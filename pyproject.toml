@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "forge-devices-orbbec-camera"
-version = "1.1.0"
+version = "2.0.0"
 description = "Linux Orbbec Gemini 2 depth camera capture and Dora streaming node."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,9 +22,9 @@ classifiers = [
     "Topic :: Multimedia :: Video :: Capture",
 ]
 dependencies = [
-    "dora-rs==0.4.1",
-    "forge-common==1.0.1",
-    "forge-msgs==1.1.0",
+    "dora-rs>=1.0.1,<2",
+    "forge-common>=2.1.0,<3",
+    "forge-msgs>=2.0.0,<3",
     "pyorbbecsdk2>=2.0.18,<3",
     "numpy>=1.26,<3",
     "opencv-python>=4.8,<6",
@@ -40,6 +40,7 @@ Issues = "https://github.com/Forgelab-Robotics/adapter-camera-orbbec/issues"
 [dependency-groups]
 dev = [
     "pytest",
+    "ruff>=0.13,<1",
 ]
 build = [
     "pip-licenses>=5,<6",

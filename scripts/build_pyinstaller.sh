@@ -44,7 +44,7 @@ fi
     --no-license-path \
     --ignore-packages dora-rs forge-devices-orbbec-camera pygame
   printf '\n\n%s\n\n' 'Dependencies with incomplete wheel license files'
-  cat "${SCRIPT_DIR}/licenses/dora-rs-0.4.1.txt"
+  cat "${SCRIPT_DIR}/licenses/dora-rs-1.0.1.txt"
   printf '\n\n'
   cat "${SCRIPT_DIR}/licenses/pygame-2.6.1-LGPL-2.1.txt"
 } > "${LICENSE_BUNDLE}"

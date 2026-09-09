@@ -14,6 +14,9 @@ src layout：`src/forge_devices_orbbec_camera`。
 
 ## 安装与环境检查
 
+运行时依赖从公开 PyPI 解析，其中 `dora-rs>=1.0.1,<2`、`forge-common>=2.1.0,<3`、
+`forge-msgs>=2.0.0,<3`；发布与部署使用仓库中的 `uv.lock` 固定实际版本。
+
 ```bash
 uv sync
 uv run python scripts/check_environment.py
@@ -126,6 +129,35 @@ Dora 图像与点云输出会尽力附加用户 metadata `capture_timestamp_ns`�
 PointCloud。该字段是可选的最佳估计，不替代 Dora 管理的消息时间戳；缓存、编码和发送
 过程不会重新生成它。`point_cloud.frame_id` 非 `null` 时，点云还会附加可选用户
 metadata `frame_id`。后端日志中的 `timestamp_ms` 是 SDK 帧时间戳，仅用于诊断。
+
+## 可选发布可观测性
+
+仅当节点启动时环境变量 **`FORGE_OBSERVABILITY=1`** 才启用；未设置、`0`、`true`
+或其他值均关闭。默认路径不采样可观测时钟，Color / Depth / IR / PointCloud 的 payload、
+业务 metadata 和既有发送失败行为保持不变。
+
+启用后，每个实际输出都严格通过 Forge Common 2.1 公共
+`Observer.publish(..., new_origin=True, ...)` 创建独立 producer origin。Color、Depth、IR、
+PointCloud 分别使用稳定低基数 origin ID：`orbbec_camera.color`、
+`orbbec_camera.depth`、`orbbec_camera.ir`、`orbbec_camera.point_cloud`。每个 payload 的
+`forge_origin_time_ns` 和 `forge_publish_time_ns` 都在该 payload 的发布边界生成，不表示整个
+FrameSet 的共同生产时间；同一 FrameSet 的跨输出关联继续由业务 metadata
+`capture_timestamp_ns` 表达。点云的可选 `frame_id` 也保持不变。相机不会观察或继承 Dora
+tick 中的 origin，因此 tick 只负责触发发送。
+
+观测时钟、指标记账或指标日志异常会降级到业务发送，不阻断相机输出。Dora 发送失败仍按原
+语义处理：图像发送异常继续传播，点云发送异常仍告警并允许图像流继续；不会因观测而重试。
+进程内使用固定 series 上限的聚合器，每 5 秒输出并清空一次
+`observability interval` JSON，只以稳定 output topic 作为 label，不保留帧 ID、origin ID、
+设备信息或逐事件记录。关闭节点时会 best-effort 尝试输出最后一个区间快照；短超时退出或
+reporter 异常时不保证该快照一定写出。
+
+```bash
+FORGE_OBSERVABILITY=1 uv run orbbec-camera --config config/sensor.example.yaml
+```
+
+确保 Dora runner 将变量传入相机进程；不设置即可保持兼容模式。日志仅保存在当前运行环境，
+本项目不会自行上传指标。跨机器使用 wall-clock 时间计算链路延迟时，需要部署方保证时钟同步。
 
 SDK 提供的 Depth 原始像素会结合 `get_depth_scale()` 归一为毫米，公共消息层再除以
 1000 转为米。快照 PNG 仍保存 uint16 毫米值，不能与 Dora `32FC1` 直接混用。

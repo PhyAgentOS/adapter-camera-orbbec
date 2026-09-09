@@ -40,6 +40,7 @@ from . import __version__
 from .backend import CaptureBackend, OrbbeFrame, create_backend
 from .config import OrbbecConfig
 from .list_devices import run_list_devices
+from .observability import Observation
 from .snapshot import resolve_snapshot_config, run_snapshot
 from .system_setup import run_init_device, runtime_preflight
 
@@ -346,11 +347,15 @@ def _send_output(
     capture_timestamp_ns: int | None,
     *,
     frame_id: str | None = None,
+    observation: Observation | None = None,
+    origin_id: str = "orbbec_camera.output",
 ) -> None:
-    node.send_output(  # type: ignore[attr-defined]
-        output_id,
-        payload,
-        metadata=_capture_metadata(capture_timestamp_ns, frame_id=frame_id),
+    metadata = _capture_metadata(capture_timestamp_ns, frame_id=frame_id)
+    if observation is None:
+        node.send_output(output_id, payload, metadata=metadata)  # type: ignore[attr-defined]
+        return
+    observation.publish(  # type: ignore[arg-type]
+        node, output_id, payload, metadata, origin_id=origin_id
     )
 
 
@@ -359,6 +364,8 @@ def _send_point_cloud_output(
     payload: pa.RecordBatch,
     config: OrbbecConfig,
     capture_timestamp_ns: int | None,
+    *,
+    observation: Observation | None = None,
 ) -> bool:
     """Send the optional derived output without disrupting image streams."""
     try:
@@ -368,6 +375,8 @@ def _send_point_cloud_output(
             payload,
             capture_timestamp_ns,
             frame_id=config.point_cloud.frame_id,
+            observation=observation,
+            origin_id="orbbec_camera.point_cloud",
         )
     except Exception as e:
         logger.warning("[orbbec_camera] 点云发送失败，继续输出图像: %s", e)
@@ -387,9 +396,25 @@ def run_node(config: OrbbecConfig) -> int:
     # Start isolated USB capture before creating Dora/Zenoh file descriptors.
     backend: CaptureBackend = create_backend(config)
 
-    from dora import Node  # noqa: PLC0415
+    from dora import Node
 
     node = Node()
+    observation: Observation | None = None
+    candidate: Observation | None = None
+    try:
+        candidate = Observation.from_env()
+        if candidate is not None:
+            candidate.start()
+        observation = candidate
+    except Exception as exc:  # noqa: BLE001 - observability is best-effort.
+        logger.warning("[orbbec_camera] 可观测功能初始化失败，继续运行: %s", exc)
+        if candidate is not None:
+            try:
+                candidate.close()
+            except Exception as close_exc:  # noqa: BLE001 - cleanup is best-effort.
+                logger.warning(
+                    "[orbbec_camera] 可观测功能初始化清理失败: %s", close_exc
+                )
 
     stop_encode = threading.Event()
     outputs_lock = threading.Lock()
@@ -453,6 +478,8 @@ def run_node(config: OrbbecConfig) -> int:
                             config.output_color,
                             out.color,
                             out.capture_timestamp_ns,
+                            observation=observation,
+                            origin_id="orbbec_camera.color",
                         )
                     else:
                         logger.warning(
@@ -467,6 +494,8 @@ def run_node(config: OrbbecConfig) -> int:
                                 config.output_depth,
                                 out.depth,
                                 out.capture_timestamp_ns,
+                                observation=observation,
+                                origin_id="orbbec_camera.depth",
                             )
                         else:
                             logger.warning(
@@ -480,6 +509,7 @@ def run_node(config: OrbbecConfig) -> int:
                             out.point_cloud,
                             config,
                             out.capture_timestamp_ns,
+                            observation=observation,
                         )
 
                     if config.ir.enabled:
@@ -489,6 +519,8 @@ def run_node(config: OrbbecConfig) -> int:
                                 config.output_ir,
                                 out.ir,
                                 out.capture_timestamp_ns,
+                                observation=observation,
+                                origin_id="orbbec_camera.ir",
                             )
                         else:
                             logger.warning(
@@ -505,10 +537,30 @@ def run_node(config: OrbbecConfig) -> int:
                     return 1
 
     finally:
+        active_exception = sys.exc_info()[0] is not None
         stop_encode.set()
-        backend.close()
-        encode_thread.join(timeout=5.0)
+        cleanup_error: Exception | None = None
+        try:
+            backend.close()
+        except Exception as exc:  # noqa: BLE001 - remaining cleanup must still run.
+            cleanup_error = exc
+            logger.error("[orbbec_camera] 后端关闭失败: %s", exc)
+        try:
+            encode_thread.join(timeout=5.0)
+        except Exception as exc:  # noqa: BLE001 - remaining cleanup must still run.
+            if cleanup_error is None:
+                cleanup_error = exc
+            logger.error("[orbbec_camera] 编码线程回收失败: %s", exc)
+        if observation is not None:
+            try:
+                observation.close()
+            except Exception as exc:  # noqa: BLE001 - cleanup is best-effort.
+                if cleanup_error is None:
+                    cleanup_error = exc
+                logger.warning("[orbbec_camera] 可观测功能关闭失败: %s", exc)
         logger.info("[orbbec_camera] 节点已关闭")
+        if cleanup_error is not None and not active_exception:
+            raise cleanup_error
 
     return 0
 

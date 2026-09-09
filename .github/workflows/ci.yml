@@ -44,6 +44,9 @@ jobs:
       - name: Install locked dependencies
         run: uv sync --frozen --python ${{ matrix.python }}
 
+      - name: Run scoped observability lint
+        run: uv run --frozen ruff check src/forge_devices_orbbec_camera/observability.py tests/test_observability.py
+
       - name: Run tests
         run: uv run --frozen pytest tests -q
 
@@ -74,7 +77,7 @@ jobs:
         run: |
           dist/orbbec_camera --version
           dist/orbbec_camera licenses > license-output.txt
-          grep -q 'dora-rs 0.4.1 license notice' license-output.txt
+          grep -Eq 'dora-rs 1\.[0-9.]+ license notice' license-output.txt
           grep -q 'pyorbbecsdk2' license-output.txt
           file dist/orbbec_camera
           ldd dist/orbbec_camera

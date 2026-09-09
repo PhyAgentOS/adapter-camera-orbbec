@@ -11,12 +11,15 @@ Release from a clean, reviewed commit using a supported Python version:
 ```bash
 uv lock --check
 uv sync --frozen
+uv run --frozen ruff check src/forge_devices_orbbec_camera/observability.py tests/test_observability.py
 uv run --frozen pytest tests -q
 uv build
 uvx pip-audit --path .venv/lib/python3.12/site-packages
 ```
 
-Confirm the wheel and sdist contain `LICENSE`, use only public dependency sources, and contain no generated captures, device identifiers, private paths, internal URLs, SDK files, or build artifacts.
+Confirm the wheel and sdist contain `LICENSE`; resolve `dora-rs>=1.0.1,<2`, `forge-common>=2.1.0,<3`, and `forge-msgs>=2.0.0,<3` only from public PyPI; and contain no generated captures, device identifiers, private paths, internal URLs, SDK files, or build artifacts.
+
+For producer-observability changes, also run unit tests with observability disabled and enabled. Confirm each actual Color/Depth/IR/PointCloud output creates an independent new origin through the Forge Common public API with its stable output-specific low-cardinality origin ID, `capture_timestamp_ns` correlates one FrameSet, tick provenance is not inherited, business metadata is retained, interval aggregation remains bounded, final reporter flush is best-effort, observation failures do not block output, and send failures retain their prior behavior.
 
 Complete the applicable hardware checks for device discovery, Color/Depth/IR capture, alignment, shutdown/reopen behavior, isolated process cleanup, and the failure modes affected by the release.
 
