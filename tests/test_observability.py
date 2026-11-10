@@ -5,7 +5,6 @@ from unittest import mock
 import pytest
 from forge_common.metrics import BoundedMetricsSink
 from forge_common.observability import Observer
-
 from forge_devices_orbbec_camera import main as main_module
 from forge_devices_orbbec_camera.config import OrbbecConfig
 from forge_devices_orbbec_camera.observability import Observation
@@ -127,6 +126,9 @@ class FakeEncodeThread:
     def join(self, timeout: float | None = None) -> None:
         self.joined = True
 
+    def is_alive(self) -> bool:
+        return False
+
 
 def test_observability_start_failure_best_effort_closes_candidate() -> None:
     backend = mock.Mock()
@@ -160,7 +162,9 @@ def test_cleanup_continues_after_backend_close_failure() -> None:
         mock.patch.object(main_module, "create_backend", return_value=backend),
         mock.patch("dora.Node", return_value=node),
         mock.patch.object(main_module.threading, "Thread", return_value=thread),
-        mock.patch.object(main_module.Observation, "from_env", return_value=observation),
+        mock.patch.object(
+            main_module.Observation, "from_env", return_value=observation
+        ),
         pytest.raises(RuntimeError, match="backend close failed"),
     ):
         main_module.run_node(OrbbecConfig())
@@ -182,7 +186,9 @@ def test_primary_exception_is_preserved_while_all_cleanup_runs() -> None:
         mock.patch.object(main_module, "create_backend", return_value=backend),
         mock.patch("dora.Node", return_value=node),
         mock.patch.object(main_module.threading, "Thread", return_value=thread),
-        mock.patch.object(main_module.Observation, "from_env", return_value=observation),
+        mock.patch.object(
+            main_module.Observation, "from_env", return_value=observation
+        ),
         pytest.raises(ValueError) as raised,
     ):
         main_module.run_node(OrbbecConfig())

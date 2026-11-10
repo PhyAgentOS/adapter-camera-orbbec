@@ -35,10 +35,7 @@ def decode_message(topic: str, value: object) -> str:
         message = CompressedImage.from_arrow(value)
         frame = message.to_numpy()
         height, width = frame.shape[:2]
-        return (
-            f"type=CompressedImage size={width}x{height} "
-            f"encoding={message.format}"
-        )
+        return f"type=CompressedImage size={width}x{height} encoding={message.format}"
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"无法解码 Image/CompressedImage: {exc}") from exc
 
@@ -49,11 +46,17 @@ def main() -> int:
     args = parser.parse_args()
     config = yaml.safe_load(Path(args.config).read_text(encoding="utf-8")) or {}
     log_every = max(1, int(config.get("log_every", 30)))
+    min_frames = int(config.get("min_frames", 1))
+    if min_frames < 1:
+        raise ValueError("min_frames must be positive")
+    expected = list(config.get("expected_inputs", []))
     counts: dict[str, int] = defaultdict(int)
 
     for event in Node():
         if event["type"] == "STOP":
             break
+        if event["type"] == "ERROR":
+            raise RuntimeError(event.get("error", "Dora error"))
         if event["type"] != "INPUT":
             continue
         topic = str(event["id"])
@@ -66,6 +69,11 @@ def main() -> int:
                 f"received_at={received_at}",
                 flush=True,
             )
+    missing = [topic for topic in expected if counts[topic] < min_frames]
+    if missing or sum(counts.values()) < min_frames:
+        raise RuntimeError(
+            f"insufficient valid frames: counts={dict(counts)}, missing={missing}"
+        )
     return 0
 
 
