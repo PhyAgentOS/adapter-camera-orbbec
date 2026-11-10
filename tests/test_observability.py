@@ -5,6 +5,7 @@ from unittest import mock
 import pytest
 from forge_common.metrics import BoundedMetricsSink
 from forge_common.observability import Observer
+
 from forge_devices_orbbec_camera import main as main_module
 from forge_devices_orbbec_camera.config import OrbbecConfig
 from forge_devices_orbbec_camera.observability import Observation
