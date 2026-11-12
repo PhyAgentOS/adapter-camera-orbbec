@@ -180,7 +180,7 @@ def _parse_args() -> argparse.Namespace:
     list_parser.add_argument(
         "--json",
         action="store_true",
-        help="输出 JSON：{\"devices\": [{\"name\": \"...\", \"address\": \"...\"}]}，供前端读取。",
+        help='输出 JSON：{"devices": [{"name": "...", "address": "..."}]}，供前端读取。',
     )
 
     snap = subparsers.add_parser(
@@ -249,7 +249,9 @@ class EncodedOutputs:
     point_cloud: pa.RecordBatch | None
 
 
-def _frame_to_color_image(frame: OrbbeFrame, config: OrbbecConfig) -> Image | CompressedImage | None:
+def _frame_to_color_image(
+    frame: OrbbeFrame, config: OrbbecConfig
+) -> Image | CompressedImage | None:
     """将 OrbbeFrame.color / color_jpeg 转为 forge_msgs.Image / CompressedImage。"""
     if frame.color_jpeg is not None:
         return CompressedImage(format="jpeg", data=frame.color_jpeg)
@@ -396,66 +398,75 @@ def run_node(config: OrbbecConfig) -> int:
     # Start isolated USB capture before creating Dora/Zenoh file descriptors.
     backend: CaptureBackend = create_backend(config)
 
-    from dora import Node
-
-    node = Node()
     observation: Observation | None = None
-    candidate: Observation | None = None
-    try:
-        candidate = Observation.from_env()
-        if candidate is not None:
-            candidate.start()
-        observation = candidate
-    except Exception as exc:  # noqa: BLE001 - observability is best-effort.
-        logger.warning("[orbbec_camera] 可观测功能初始化失败，继续运行: %s", exc)
-        if candidate is not None:
-            try:
-                candidate.close()
-            except Exception as close_exc:  # noqa: BLE001 - cleanup is best-effort.
-                logger.warning(
-                    "[orbbec_camera] 可观测功能初始化清理失败: %s", close_exc
-                )
-
     stop_encode = threading.Event()
-    outputs_lock = threading.Lock()
-    latest_outputs: EncodedOutputs | None = None
-    encode_error: str | None = None
-    last_sent_seq = -1
-
-    def encode_loop() -> None:
-        nonlocal latest_outputs, encode_error
-        after_seq = -1
-        while not stop_encode.is_set():
-            try:
-                frame, seq = backend.wait_new_frame(after_seq, timeout=0.5)
-            except RuntimeError as exc:
-                encode_error = str(exc)
-                stop_encode.set()
-                return
-            if seq <= after_seq:
-                continue
-            after_seq = seq
-            encoded = _encode_frame(frame, config, seq)
-            with outputs_lock:
-                latest_outputs = encoded
-
-    encode_thread = threading.Thread(
-        target=encode_loop,
-        name="orbbec-encode",
-        daemon=True,
-    )
-    encode_thread.start()
-
-    logger.info(
-        "[orbbec_camera] 节点启动，输出: color=%s depth=%s ir=%s point_cloud=%s (%s)",
-        config.output_color,
-        config.output_depth,
-        config.output_ir,
-        config.output_point_cloud,
-        "enabled" if config.point_cloud.enabled else "disabled",
-    )
+    encode_thread: threading.Thread | None = None
+    encode_started = False
 
     try:
+        from dora import Node
+
+        node = Node()
+        candidate: Observation | None = None
+        try:
+            candidate = Observation.from_env()
+            if candidate is not None:
+                candidate.start()
+            observation = candidate
+        except Exception as exc:  # noqa: BLE001 - observability is best-effort.
+            logger.warning("[orbbec_camera] 可观测功能初始化失败，继续运行: %s", exc)
+            if candidate is not None:
+                try:
+                    candidate.close()
+                except Exception as close_exc:  # noqa: BLE001 - cleanup is best-effort.
+                    logger.warning(
+                        "[orbbec_camera] 可观测功能初始化清理失败: %s", close_exc
+                    )
+
+        outputs_lock = threading.Lock()
+        latest_outputs: EncodedOutputs | None = None
+        encode_error: str | None = None
+        last_sent_seq = -1
+
+        def encode_loop() -> None:
+            nonlocal latest_outputs, encode_error
+            after_seq = -1
+            while not stop_encode.is_set():
+                try:
+                    frame, seq = backend.wait_new_frame(after_seq, timeout=0.5)
+                except RuntimeError as exc:
+                    encode_error = str(exc)
+                    stop_encode.set()
+                    return
+                if seq <= after_seq:
+                    continue
+                after_seq = seq
+                try:
+                    encoded = _encode_frame(frame, config, seq)
+                except Exception as exc:
+                    encode_error = f"frame encoding failed: {exc}"
+                    stop_encode.set()
+                    return
+                with outputs_lock:
+                    latest_outputs = encoded
+
+        encode_thread = threading.Thread(
+            target=encode_loop,
+            name="orbbec-encode",
+            daemon=True,
+        )
+        encode_thread.start()
+        encode_started = True
+
+        logger.info(
+            "[orbbec_camera] 节点启动，输出: color=%s depth=%s ir=%s point_cloud=%s (%s)",
+            config.output_color,
+            config.output_depth,
+            config.output_ir,
+            config.output_point_cloud,
+            "enabled" if config.point_cloud.enabled else "disabled",
+        )
+
         for event in node:
             match event["type"]:
                 case "INPUT":
@@ -533,7 +544,9 @@ def run_node(config: OrbbecConfig) -> int:
                     break
 
                 case "ERROR":
-                    logger.error("[orbbec_camera] dora 错误: %s", event.get("error", "unknown"))
+                    logger.error(
+                        "[orbbec_camera] dora 错误: %s", event.get("error", "unknown")
+                    )
                     return 1
 
     finally:
@@ -546,7 +559,10 @@ def run_node(config: OrbbecConfig) -> int:
             cleanup_error = exc
             logger.error("[orbbec_camera] 后端关闭失败: %s", exc)
         try:
-            encode_thread.join(timeout=5.0)
+            if encode_started and encode_thread is not None:
+                encode_thread.join(timeout=5.0)
+                if encode_thread.is_alive():
+                    raise RuntimeError("encoder thread did not terminate")
         except Exception as exc:  # noqa: BLE001 - remaining cleanup must still run.
             if cleanup_error is None:
                 cleanup_error = exc

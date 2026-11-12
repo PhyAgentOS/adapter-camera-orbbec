@@ -1,0 +1,158 @@
+{
+  "repository": "adapter-camera-orbbec",
+  "round": "msgs-2.1.0 alignment / 2026-11-12",
+  "breaking_change": "Forge 1.x / Dora 0.4.x to Forge 2.x / Dora 1.x requires aligned Forge packages, runtime services, node peers and rebuilt artifacts. Forge families version independently. forge_msgs.v1 remains unchanged.",
+  "changes": [
+    "Update paired README deployment/version compatibility notice",
+    "Require Python forge-msgs >=2.1.0,<3 and lock public Msgs 2.1.0 / Pillow 13.0.0, preserving all other locked package versions"
+  ],
+  "lock_updates": [
+    {
+      "repo": "adapter-camera-orbbec",
+      "lock": "uv.lock",
+      "command": [
+        "${WORKSPACE}/.tools/bin/uv",
+        "lock",
+        "--upgrade-package",
+        "forge-msgs==2.1.0",
+        "--upgrade-package",
+        "pillow==13.0.0"
+      ],
+      "exit_code": 0,
+      "version_changes": [
+        {
+          "name": "forge-msgs",
+          "before": "2.0.0",
+          "after": "2.1.0"
+        },
+        {
+          "name": "pillow",
+          "before": "12.3.0",
+          "after": "13.0.0"
+        }
+      ]
+    }
+  ],
+  "lock_checks": [
+    {
+      "repo": "adapter-camera-orbbec",
+      "lock": "uv.lock",
+      "check_exit": 0
+    }
+  ],
+  "software_tests": {
+    "repo": "adapter-camera-orbbec",
+    "environment": "${WORKSPACE}/adapter-camera-orbbec/.venv/bin/python",
+    "commands": [
+      [
+        "${WORKSPACE}/.tools/bin/uv",
+        "pip",
+        "install",
+        "--python",
+        "${WORKSPACE}/adapter-camera-orbbec/.venv/bin/python",
+        "--no-deps",
+        "--index-url",
+        "https://pypi.org/simple",
+        "forge-msgs==2.1.0",
+        "pillow==13.0.0"
+      ],
+      [
+        "${WORKSPACE}/adapter-camera-orbbec/.venv/bin/python",
+        "-c",
+        "from importlib.metadata import version; import json; print(json.dumps({n:version(n) for n in ['forge-msgs','pillow','dora-rs']}))"
+      ],
+      [
+        "${WORKSPACE}/.tools/bin/uv",
+        "pip",
+        "check",
+        "--python",
+        "${WORKSPACE}/adapter-camera-orbbec/.venv/bin/python"
+      ],
+      [
+        "${WORKSPACE}/adapter-camera-orbbec/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--import-mode=importlib"
+      ]
+    ],
+    "scope": "Existing local test environment with exact public Msgs/Pillow update; platform SDK exclusions are reported, not production acceptance.",
+    "update_exit": 0,
+    "versions_exit": 0,
+    "dependency_check_exit": 0,
+    "tests_exit": 0,
+    "test_summary": [
+      "............................................................... [ 55%]",
+      "...................................................                      [100%]",
+      "114 passed, 81 subtests passed in 5.52s"
+    ],
+    "installed_versions": {
+      "forge-msgs": "2.1.0",
+      "pillow": "13.0.0",
+      "dora-rs": "1.0.1"
+    }
+  },
+  "dependency_audit": {
+    "repo": "adapter-camera-orbbec",
+    "audit_exit": 0,
+    "findings": [],
+    "skipped": []
+  },
+  "dora_run_records": [
+    {
+      "repo": "adapter-camera-orbbec",
+      "entry": "orbbec",
+      "scope": "Absent serial prerequisite diagnostic only; no physical camera capture accepted.",
+      "mode": "chain",
+      "command": [
+        "${WORKSPACE}/.test-env/bin/dora",
+        "run",
+        "${WORKSPACE}/validation/downstream-msgs210-20261112/native/orbbec/chain/dataflow.yaml",
+        "--stop-after",
+        "4s"
+      ],
+      "exit_code": 1,
+      "error": null,
+      "passed": false,
+      "includes_gateway": true,
+      "status": "diagnostic only / not accepted",
+      "source_report": "native/orbbec/chain/report.json",
+      "runtime_errors": [
+        "2026-11-12T08:15:21.549650Z ERROR node_failure: dora_daemon::spawn::prepared: node exited with error: ExitCode(1) node_id=target dataflow_id=01a1ced3-5f25-71fc-9340-713e2b8a5b57",
+        "16:15:21 ERROR  target: daemon exited with code 1 with stderr output:",
+        "16:15:22 stdout adapter-forge-gateway: 2026-11-12 16:15:22 - forge_gateway.cli - ERROR - gateway startup failed: Could not initiate node from environment variable. For dynamic node, please add a node id in the initialization function.",
+        "2026-11-12T08:15:22.165140Z ERROR node_failure: dora_daemon::spawn::prepared: node exited with error: ExitCode(1) node_id=adapter-forge-gateway dataflow_id=01a1ced3-5f25-71fc-9340-713e2b8a5b57",
+        "16:15:22 ERROR  adapter-forge-gateway: daemon exited with code 1. This error occurred because node `target` exited before connecting to dora."
+      ],
+      "local_evidence": "Full original Dora log is retained under validation/downstream-msgs210-20261112/native/orbbec/chain/dora.log"
+    },
+    {
+      "repo": "adapter-camera-orbbec",
+      "entry": "orbbec",
+      "scope": "Absent serial prerequisite diagnostic only; no physical camera capture accepted.",
+      "mode": "single",
+      "command": [
+        "${WORKSPACE}/.test-env/bin/dora",
+        "run",
+        "${WORKSPACE}/validation/downstream-msgs210-20261112/native/orbbec/single/dataflow.yaml",
+        "--stop-after",
+        "4s"
+      ],
+      "exit_code": 1,
+      "error": null,
+      "passed": false,
+      "includes_gateway": false,
+      "status": "diagnostic only / not accepted",
+      "source_report": "native/orbbec/single/report.json",
+      "runtime_errors": [
+        "2026-11-12T08:15:21.324297Z ERROR node_failure: dora_daemon::spawn::prepared: node exited with error: ExitCode(1) node_id=target dataflow_id=01a1ced3-5c0b-76ad-9f34-3eb0d7543636",
+        "16:15:21 ERROR  target: daemon exited with code 1 with stderr output:"
+      ],
+      "local_evidence": "Full original Dora log is retained under validation/downstream-msgs210-20261112/native/orbbec/single/dora.log"
+    }
+  ],
+  "remaining": "Absent-serial/USB environment prerequisite diagnostic; actual Gemini 2 color/depth node capture not accepted.",
+  "acceptance": "Pending; software checks, fake/dummy backends and negative prerequisite records are scoped evidence only. Every new multi-node graph contains adapter-forge-gateway.",
+  "gitlab_sync": "Not performed; follows completed acceptance.",
+  "log_publication": "Original logs remain in the local validation workspace. This public report publishes reviewed commands, outcomes, assertions and limitations only."
+}
