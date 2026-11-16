@@ -922,11 +922,12 @@ class BackendLifecycleTests(unittest.TestCase):
         backend._lock = threading.Lock()
         backend._frame_cond = threading.Condition(backend._lock)
         backend._first_frame_event = threading.Event()
-        backend._stop_event = threading.Event()
-        backend._stop_event.wait = mock.Mock(return_value=False)
         backend._init_done = threading.Event()
         backend._init_error = None
         backend._terminal_error = None
+        backend._last_frame_at = None
+        backend._stop_event = threading.Event()
+        backend._stop_event.wait = mock.Mock(return_value=False)
         backend._depth_sdk_filters = []
         backend._depth_hw_range_ok = False
         backend._create_pipeline = mock.Mock(return_value=pipeline)
@@ -964,6 +965,8 @@ class BackendLifecycleTests(unittest.TestCase):
         backend._frame_seq = 0
         backend._latest_frame = None
         backend._terminal_error = None
+        backend._last_frame_at = None
+        backend._stop_event = threading.Event()
         expected = OrbbeFrame(color=None, depth=None, ir=None, timestamp_ms=9)
 
         def publish() -> None:
@@ -1059,10 +1062,17 @@ class BackendLifecycleTests(unittest.TestCase):
         pipeline.wait_for_frames.return_value = object()
         config = OrbbecConfig(prewarm_frames=2)
         backend = self._loop_backend(config, pipeline)
-        expected = OrbbeFrame(color=None, depth=None, ir=None)
+        expected = OrbbeFrame(
+            color=np.zeros((1, 1, 3), dtype=np.uint8),
+            depth=np.ones((1, 1), dtype=np.float32),
+            ir=np.zeros((1, 1), dtype=np.uint8),
+        )
+
+        backend._first_frame_event.set = mock.Mock(
+            side_effect=backend._stop_event.set
+        )
 
         def convert(_frameset: object) -> OrbbeFrame:
-            backend._stop_event.set()
             return expected
 
         backend._convert_frameset = mock.Mock(side_effect=convert)

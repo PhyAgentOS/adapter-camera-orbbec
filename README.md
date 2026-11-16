@@ -45,6 +45,29 @@ Use `orbbec-camera --help` (or `uv run --frozen orbbec-camera --help`) for suppo
 The example configuration is `config/sensor.example.yaml`; choose the actual device and supported
 stream profiles before starting. This command requires an appropriate Dora dataflow.
 
+## Capture readiness and failures
+
+`init_timeout_sec` bounds SDK initialization, stream setup, `prewarm_frames` and
+receipt of the first usable frame. Readiness requires color (RGB or JPEG) plus
+all enabled depth/IR streams; optional point-cloud conversion does not block it.
+In `capture_process: isolated` mode, the worker reports ready only after queuing
+that first frame. The parent allows another 5 seconds for process startup/IPC.
+
+After readiness, 5 seconds without a complete usable frame is a terminal capture
+failure. Empty or incomplete frames do not refresh this deadline. Readers reject
+old cached frames, and the Dora node exits with an error instead of remaining
+silently stalled. The isolated proxy also checks for a worker that stays alive
+without delivering new frame sequences. A short `wait_new_frame` timeout may
+still return the current frame with its unchanged sequence before that deadline.
+
+Shutdown closes the camera before discarding pending image packets, so an unread
+large RGBD packet cannot hold the worker open on a requested stop. Forced process
+termination is logged; a backend that still cannot stop raises an error.
+
+These lifecycle checks do not fix the vendor SDK's `Update data size > data buffer
+size` error or establish hardware D2C profile incompatibility. Keep SDK buffer
+validation enabled; a persistent failure needs SDK/device-level investigation.
+
 ## Message contract
 
 RGB: Image rgb8 or JPEG CompressedImage; depth: Image 32FC1 in metres; IR: mono8/16UC1. Point cloud is optional.
