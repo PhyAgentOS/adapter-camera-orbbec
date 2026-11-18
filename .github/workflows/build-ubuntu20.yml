@@ -1,0 +1,112 @@
+name: Build Ubuntu 20.04 binary
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to build
+        required: true
+        default: v1.1.1
+      version:
+        description: Orbbec camera version without the v prefix
+        required: true
+        default: 1.1.1
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:20.04
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      BUILD_REF: ${{ inputs.ref }}
+    steps:
+      - name: Verify release branch and inputs
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_NAME}" != "stable/1.x" || ! "${RELEASE_VERSION}" =~ ^1\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ || "${BUILD_REF}" != "v${RELEASE_VERSION}" ]]; then
+            echo "Dispatch this workflow from stable/1.x using a pushed v1.x version tag and matching version." >&2
+            exit 1
+          fi
+
+      - name: Install system tools
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            binutils \
+            build-essential \
+            ca-certificates \
+            cmake \
+            curl \
+            file \
+            git \
+            libgl1 \
+            libglib2.0-0 \
+            libusb-1.0-0 \
+            libwayland-client0 \
+            libx11-6 \
+            libxcursor1 \
+            libxext6 \
+            libxinerama1 \
+            libxi6 \
+            libxkbcommon0 \
+            libxrandr2 \
+            libxss1 \
+            libxxf86vm1 \
+            linux-libc-dev \
+            pkg-config
+          rm -rf /var/lib/apt/lists/*
+
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Verify tag ancestry
+        run: |
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/${BUILD_REF}^{commit}")"
+          git merge-base --is-ancestor HEAD "${GITHUB_SHA}"
+
+      - name: Install uv and Python 3.12
+        run: |
+          curl -LsSf https://astral.sh/uv/0.12.5/install.sh |
+            env UV_INSTALL_DIR=/usr/local/bin sh
+          uv python install 3.12
+          uv --version
+          uv run --no-project --python 3.12 python --version
+
+      - name: Build with PyInstaller
+        run: ./scripts/build_pyinstaller.sh
+
+      - name: Verify and package binary
+        run: |
+          test "${BUILD_REF}" = "v${RELEASE_VERSION}"
+          ./dist/orbbec_camera --version | tee /tmp/version.txt
+          grep -Fx "orbbec-camera ${RELEASE_VERSION}" /tmp/version.txt
+          file ./dist/orbbec_camera
+          ldd --version | sed -n '1p'
+          archive="orbbec_camera-v${RELEASE_VERSION}-ubuntu20.04-x86_64.tar.gz"
+          tar \
+            --sort=name \
+            --mtime='UTC 1970-01-01' \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            -C dist \
+            -czf "${archive}" \
+            orbbec_camera
+          sha256sum "${archive}" > "${archive}.sha256"
+          test "$(tar -tzf "${archive}")" = "orbbec_camera"
+          sha256sum --check "${archive}.sha256"
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: orbbec_camera-v${{ inputs.version }}-ubuntu20.04-x86_64
+          path: |
+            orbbec_camera-v${{ inputs.version }}-ubuntu20.04-x86_64.tar.gz
+            orbbec_camera-v${{ inputs.version }}-ubuntu20.04-x86_64.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 30

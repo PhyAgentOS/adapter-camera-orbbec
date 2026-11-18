@@ -60,10 +60,11 @@ Before upload, verify the CLI and a real snapshot, inspect ELF dependencies and 
 
 ## GitHub Actions and publication
 
-Push the annotated version tag to the upstream repository. From the default
-branch, manually run **Build Ubuntu 20.04 binary** with that tag as `ref` and
-the package version as `version`. This also builds maintenance tags on
-`stable/1.x`. Download the archive and checksum from the successful Actions
+Merge and push the annotated version tag to the upstream repository first.
+Manually run **Build Ubuntu 20.04 binary** from `stable/1.x` for a Forge 1
+release, with the existing `v1.x` release tag as `ref` and the matching
+package version as `version`. The workflow checks that the tag belongs to the
+dispatch branch. Download the archive and checksum from the successful Actions
 run, validate them, and attach both to the GitHub Release for the tag.
 
 The workflow uploads an Actions artifact. A branch merge, a tag push, or a
