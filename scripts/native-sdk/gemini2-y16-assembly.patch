@@ -1,0 +1,167 @@
+diff --git a/3rdparty/libuvc/src/include/libuvc/libuvc_internal.h b/3rdparty/libuvc/src/include/libuvc/libuvc_internal.h
+index 27a67a2..ca36c33 100644
+--- a/3rdparty/libuvc/src/include/libuvc/libuvc_internal.h
++++ b/3rdparty/libuvc/src/include/libuvc/libuvc_internal.h
+@@ -221,6 +221,13 @@ struct uvc_stream_handle {
+     uint64_t                         diagnostic_status[7];
+     uint64_t                         diagnostic_last_submit_ms, diagnostic_last_callback_ms, diagnostic_last_report_ms;
+     unsigned int                     diagnostic_active, diagnostic_inflight;
++    size_t                           gemini_depth_frame_bytes;
++    size_t                           gemini_depth_last_bad_size;
++    unsigned int                     gemini_depth_bad_headers;
++    unsigned int                     gemini_depth_bad_frames;
++    unsigned int                     gemini_depth_bad_after_first;
++    unsigned int                     gemini_depth_valid_frames;
++    uint8_t                          gemini_depth_invalid;
+     /* Transient submit-failure recovery: a parked slot keeps its transfer but holds no
+      * kernel request, so retries ride on the completions of slots still in flight.
+      * Guarded by cb_mutex. */
+diff --git a/3rdparty/libuvc/src/src/stream.c b/3rdparty/libuvc/src/src/stream.c
+index aa45864..0e56b92 100644
+--- a/3rdparty/libuvc/src/src/stream.c
++++ b/3rdparty/libuvc/src/src/stream.c
+@@ -575,12 +575,33 @@ uvc_error_t uvc_probe_still_ctrl(uvc_device_handle_t *devh, uvc_still_ctrl_t *st
+     return res;
+ }
+
++static void _uvc_reset_assembly(uvc_stream_handle_t *strmh) {
++    strmh->got_bytes                = 0;
++    strmh->meta_got_bytes           = 0;
++    strmh->last_scr                 = 0;
++    strmh->pts                      = 0;
++    strmh->payload_header_got_bytes = 0;
++    strmh->gemini_depth_invalid     = 0;
++}
++
+ /** @internal
+  * @brief Swap the working buffer with the presented buffer and notify consumers
+  */
+ void _uvc_swap_buffers(uvc_stream_handle_t *strmh) {
+     uint8_t *tmp_buf;
+
++    if(strmh->gemini_depth_frame_bytes) {
++        if(strmh->gemini_depth_invalid || strmh->got_bytes != strmh->gemini_depth_frame_bytes) {
++            if(!strmh->gemini_depth_invalid)
++                strmh->gemini_depth_last_bad_size = strmh->got_bytes;
++            strmh->gemini_depth_bad_frames++;
++            strmh->gemini_depth_bad_after_first += strmh->gemini_depth_valid_frames != 0;
++            _uvc_reset_assembly(strmh);
++            return;
++        }
++        strmh->gemini_depth_valid_frames++;
++    }
++
+     pthread_mutex_lock(&strmh->cb_mutex);
+
+     (void)clock_gettime(CLOCK_MONOTONIC, &strmh->capture_time_finished);
+@@ -610,11 +631,7 @@ void _uvc_swap_buffers(uvc_stream_handle_t *strmh) {
+     pthread_mutex_unlock(&strmh->cb_mutex);
+
+     strmh->seq++;
+-    strmh->got_bytes                = 0;
+-    strmh->meta_got_bytes           = 0;
+-    strmh->last_scr                 = 0;
+-    strmh->pts                      = 0;
+-    strmh->payload_header_got_bytes = 0;
++    _uvc_reset_assembly(strmh);
+ }
+
+ /** @internal
+@@ -657,6 +674,14 @@ void _uvc_process_payload(uvc_stream_handle_t *strmh, uint8_t *payload, size_t p
+         header_len = payload[0];
+
+         if(header_len > payload_len) {
++            if(strmh->gemini_depth_frame_bytes) {
++                strmh->gemini_depth_bad_headers++;
++                strmh->gemini_depth_bad_after_first += strmh->gemini_depth_valid_frames != 0;
++                if(strmh->got_bytes) {
++                    strmh->gemini_depth_last_bad_size = strmh->got_bytes;
++                    strmh->gemini_depth_invalid = 1;
++                }
++            }
+             UVC_DEBUG("bogus packet: actual_len=%zd, header_len=%zd\n", payload_len, header_len);
+             return;
+         }
+@@ -667,6 +692,23 @@ void _uvc_process_payload(uvc_stream_handle_t *strmh, uint8_t *payload, size_t p
+             data_len = payload_len - header_len;
+     }
+
++    if(strmh->gemini_depth_frame_bytes) {
++        // Gemini 2 Y16 sends a UVC header with EOH, PTS and SCR on each payload.
++        // On some starts, bulk fragments without that header precede valid data.
++        if(header_len < 12 || (payload[1] & 0xcc) != 0x8c) {
++            strmh->gemini_depth_bad_headers++;
++            strmh->gemini_depth_bad_after_first += strmh->gemini_depth_valid_frames != 0;
++            if(strmh->got_bytes) {
++                strmh->gemini_depth_last_bad_size = strmh->got_bytes;
++                strmh->gemini_depth_invalid = 1;
++            }
++            return;
++        }
++        if(strmh->got_bytes && (strmh->fid != (payload[1] & 1) || strmh->pts != DW_TO_INT(payload + 2))) {
++            _uvc_swap_buffers(strmh);
++        }
++    }
++
+     if(strmh->payload_header_got_bytes == 0) {
+         strmh->payload_header_got_bytes = header_len;
+         memcpy(strmh->payload_header_outbuf, payload, header_len);
+@@ -717,6 +759,20 @@ void _uvc_process_payload(uvc_stream_handle_t *strmh, uint8_t *payload, size_t p
+         }
+     }
+
++    if(strmh->gemini_depth_frame_bytes) {
++        if(!strmh->gemini_depth_invalid && data_len > strmh->gemini_depth_frame_bytes - strmh->got_bytes) {
++            strmh->gemini_depth_last_bad_size = strmh->got_bytes + data_len;
++            strmh->gemini_depth_invalid = 1;
++        }
++        if(!strmh->gemini_depth_invalid && data_len > 0) {
++            memcpy(strmh->outbuf + strmh->got_bytes, payload + header_len, data_len);
++            strmh->got_bytes += data_len;
++        }
++        if((header_info & (1 << 1)) && (strmh->got_bytes || strmh->gemini_depth_invalid)) {
++            _uvc_swap_buffers(strmh);
++        }
++        return;
++    }
+     if(data_len > 0) {
+         // bugfix：USB不稳定或带宽不足时会丢包，有概率会丢到EOF包，导致strmh->got_bytes过大，memcpy越界
+         if(strmh->got_bytes + data_len < LIBUVC_XFER_BUF_SIZE) {
+@@ -1371,6 +1427,22 @@ uvc_error_t uvc_stream_start(uvc_stream_handle_t *strmh, uvc_frame_callback_t *c
+      * (UVC 1.5: 2.4.3. VideoStreaming Interface) */
+     isochronous = interface->num_altsetting > 1;
+
++    strmh->gemini_depth_frame_bytes = 0;
++    strmh->gemini_depth_last_bad_size = 0;
++    strmh->gemini_depth_bad_headers = 0;
++    strmh->gemini_depth_bad_frames = 0;
++    strmh->gemini_depth_bad_after_first = 0;
++    strmh->gemini_depth_valid_frames = 0;
++    _uvc_reset_assembly(strmh);
++    if(!isochronous && strmh->frame_format == UVC_FRAME_FORMAT_Y16) {
++        struct libusb_device_descriptor descriptor;
++        const size_t frame_bytes = (size_t)frame_desc->wWidth * frame_desc->wHeight * sizeof(uint16_t);
++        if(libusb_get_device_descriptor(strmh->devh->dev->usb_dev, &descriptor) == LIBUSB_SUCCESS
++           && descriptor.idVendor == 0x2bc5 && descriptor.idProduct == 0x0670 && frame_bytes <= LIBUVC_XFER_BUF_SIZE) {
++            strmh->gemini_depth_frame_bytes = frame_bytes;
++        }
++    }
++
+     if(isochronous) {
+         /* For isochronous streaming, we choose an appropriate altsetting for the endpoint
+          * and set up several transfers */
+@@ -1807,6 +1879,14 @@ uvc_error_t uvc_stream_stop(uvc_stream_handle_t *strmh) {
+         pthread_cond_wait(&strmh->cb_cond, &strmh->cb_mutex);
+     } while(1);
+     _uvc_log_retry_summary(strmh, "stopped", 1);
++    if(strmh->gemini_depth_frame_bytes && strmh->diagnostic_cb) {
++        char message[384];
++        snprintf(message, sizeof(message),
++                 "Gemini 2 Y16 assembly: valid=%u bad_headers=%u bad_frames=%u bad_after_first=%u expected=%zu last_bad_size=%zu",
++                 strmh->gemini_depth_valid_frames, strmh->gemini_depth_bad_headers, strmh->gemini_depth_bad_frames,
++                 strmh->gemini_depth_bad_after_first, strmh->gemini_depth_frame_bytes, strmh->gemini_depth_last_bad_size);
++        strmh->diagnostic_cb(UVC_DIAG_IMPORTANT, message, strmh->diagnostic_user);
++    }
+     // Kick the user thread awake
+     pthread_cond_broadcast(&strmh->cb_cond);
+     pthread_mutex_unlock(&strmh->cb_mutex);

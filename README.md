@@ -48,6 +48,38 @@ privileged helper 只原子安装固定内嵌规则、将 `PKEXEC_UID` 对应的
 官方工具验证应先使用 Orbbec Viewer 或 SDK 官方示例确认设备、固件、流 profile
 和深度工作模式，再运行本项目。
 
+## 取流就绪与停滞处理
+
+此 Forge 1 分支固定使用 `dora-rs==0.4.1`、`forge-common==1.0.1` 和
+`forge-msgs==1.3.1`；相机节点应与 Dora 0.4.1 CLI/coordinator/daemon 一起运行。
+`forge-msgs` 从 1.1.0 升至 1.3.1，以允许锁定 Pillow 13，修复依赖审计发现的
+Pillow 12.3.0 安全问题。
+
+`init_timeout_sec` 覆盖每次 SDK 初始化尝试、流配置、预热和首个完整帧。完整帧需包含彩色图像
+（RGB 或 JPEG）及所有启用的 Depth/IR 流；可选点云转换不影响就绪判断。隔离进程
+只有在首帧入队后才报告就绪。可恢复故障会以 1 秒间隔最多重开 Pipeline 两次；
+父进程的启动期限覆盖三次尝试，并另留 5 秒用于启动与 IPC。
+
+就绪后若连续 5 秒没有完整可用帧，会触发 Pipeline 重开。空帧或缺失流的帧
+不能刷新计时；恢复期间读取端拒绝旧缓存，帧序号在重开后继续递增。短时间内
+最多重试两次，连续正常出帧 60 秒后重置重试额度。设备断开或重试用尽仍报错退出。
+停流期限内，短时 `wait_new_frame` 超时可能返回序号不变的当前帧，不代表获得新帧。
+
+停止时会先关闭相机，再丢弃尚未读取的图像包，避免大 RGBD 消息阻塞队列退出。
+强制结束会记录日志，无法停止的后端会抛出错误。
+
+Linux 二进制使用 `pyorbbecsdk2==2.1.3` 的 Python 绑定，并从固定的 SDK 2.10.6
+源码构建带补丁的原生库。补丁在 Gemini 2 的 bulk Y16 路径验证 UVC 包头及帧长度，
+关闭流时记录被拒绝的包和帧数。指定 USB 序列号时，隔离后端会在设备地址消失时
+立即报告断开，包括设备重新枚举的情况。
+发布端每个 tick 最多发一组图像，最多缓存两组已编码
+图像，缓存满时丢弃最旧的一组。
+
+构建二进制需要 CMake、C/C++ 工具链、pkg-config 和 SDK 源码访问权限。Linux 源码
+调试可运行 `bash scripts/build_native_sdk.sh build/native-sdk`，并将相机进程的
+`LD_PRELOAD` 设为 `build/native-sdk/lib/libOrbbecSDK.so.2` 的绝对路径。
+常规 `uv sync` 安装公开 wheel。
+
 ## 基础命令
 
 ```bash

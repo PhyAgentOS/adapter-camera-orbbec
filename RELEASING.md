@@ -57,3 +57,14 @@ The public archive is named `orbbec_camera-v<version>-linux-x86_64.tar.gz` and c
 The PyInstaller executable bundles Python and native Orbbec SDK components but remains tied to Linux x86_64 and a compatible glibc baseline. The target system still requires the appropriate kernel USB support, libusb runtime, udev permissions, and camera hardware.
 
 Before upload, verify the CLI and a real snapshot, inspect ELF dependencies and minimum glibc symbols, scan for private paths and internal URLs, record SHA-256, and test on the oldest supported deployment image. Verify both `orbbec_camera --version` and `orbbec_camera licenses`; license information must also remain available in the repository and source release.
+
+## GitHub Actions and publication
+
+Push the annotated version tag to the upstream repository. From the default
+branch, manually run **Build Ubuntu 20.04 binary** with that tag as `ref` and
+the package version as `version`. This also builds maintenance tags on
+`stable/1.x`. Download the archive and checksum from the successful Actions
+run, validate them, and attach both to the GitHub Release for the tag.
+
+The workflow uploads an Actions artifact. A branch merge, a tag push, or a
+successful build does not publish a GitHub Release or publish to PyPI.
