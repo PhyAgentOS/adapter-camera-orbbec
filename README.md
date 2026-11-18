@@ -51,7 +51,9 @@ privileged helper 只原子安装固定内嵌规则、将 `PKEXEC_UID` 对应的
 ## 取流就绪与停滞处理
 
 此 Forge 1 分支固定使用 `dora-rs==0.4.1`、`forge-common==1.0.1` 和
-`forge-msgs==1.1.0`；相机节点应与 Dora 0.4.1 CLI/coordinator/daemon 一起运行。
+`forge-msgs==1.3.1`；相机节点应与 Dora 0.4.1 CLI/coordinator/daemon 一起运行。
+`forge-msgs` 从 1.1.0 升至 1.3.1，以允许锁定 Pillow 13，修复依赖审计发现的
+Pillow 12.3.0 安全问题。
 
 `init_timeout_sec` 覆盖 SDK 初始化、流配置、预热和首个完整帧。完整帧需包含彩色图像
 （RGB 或 JPEG）及所有启用的 Depth/IR 流；可选点云转换不影响就绪判断。隔离进程
