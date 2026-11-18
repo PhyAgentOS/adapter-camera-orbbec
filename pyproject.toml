@@ -22,7 +22,7 @@ classifiers = [
     "Topic :: Multimedia :: Video :: Capture",
 ]
 dependencies = [
-    "dora-rs>=1.0.1,<2",
+    "dora-rs>=0.4.1,<2",
     "forge-common>=2.1.0,<3",
     "forge-msgs>=2.1.0,<3",
     "pyorbbecsdk2>=2.0.18,<3",

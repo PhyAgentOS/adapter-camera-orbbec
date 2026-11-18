@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   test:
-    name: Python ${{ matrix.python }}
+    name: Python ${{ matrix.python }} / Dora ${{ matrix.dora }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -19,6 +19,9 @@ jobs:
         python:
           - "3.11"
           - "3.12"
+        dora:
+          - "0.4.1"
+          - "1.0.1"
 
     steps:
       - name: Check out repository
@@ -44,11 +47,17 @@ jobs:
       - name: Install locked dependencies
         run: uv sync --frozen --python ${{ matrix.python }}
 
+      - name: Select matching Dora Python runtime
+        run: |
+          uv pip install --python .venv/bin/python --no-deps dora-rs==${{ matrix.dora }}
+          uv pip check --python .venv/bin/python
+          .venv/bin/python -c "import importlib.metadata as m; assert m.version('dora-rs') == '${{ matrix.dora }}'"
+
       - name: Run scoped observability lint
-        run: uv run --frozen ruff check src/forge_devices_orbbec_camera/observability.py tests/test_observability.py
+        run: .venv/bin/ruff check src/forge_devices_orbbec_camera/observability.py tests/test_observability.py tests/test_capture_health.py
 
       - name: Run tests
-        run: uv run --frozen pytest tests -q
+        run: .venv/bin/python -m pytest tests -q
 
       - name: Build source and wheel packages
         run: uv build
