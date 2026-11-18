@@ -29,7 +29,9 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y \
             binutils \
             build-essential \
+            build-essential \
             ca-certificates \
+            cmake \
             curl \
             file \
             git \
@@ -46,7 +48,8 @@ jobs:
             libxrandr2 \
             libxss1 \
             libxxf86vm1 \
-            linux-libc-dev
+            linux-libc-dev \
+            pkg-config
           rm -rf /var/lib/apt/lists/*
 
       - uses: actions/checkout@v6

@@ -69,13 +69,12 @@ Shutdown closes the camera before discarding pending image packets, so an unread
 large RGBD packet cannot hold the worker open on a requested stop. Forced process
 termination is logged; a backend that still cannot stop raises an error.
 
-These lifecycle checks do not fix the vendor SDK's `Update data size > data buffer
-size` error or establish hardware D2C profile incompatibility. Keep SDK buffer
-validation enabled; a persistent failure needs SDK/device-level investigation.
-The runtime pins `pyorbbecsdk2==2.1.3`. On the tested Gemini 2, a Dora RGBD
-flow with 2.1.2 stalled after its first frame, while 2.1.3 sustained more
-than one minute of paired images. Native buffer warnings can still occur; this
-SDK update does not establish that the vendor fault is fully fixed.
+The Linux binary build uses the Python bindings from `pyorbbecsdk2==2.1.3`
+and compiles the pinned native SDK 2.10.6 with a Gemini 2 bulk Y16 patch.
+The patch checks UVC headers and frame sizes before handing frames to the SDK.
+The SDK logs rejected payload and frame counts on shutdown.
+Each tick publishes at most one RGBD set. The publisher retains two encoded
+sets and drops the oldest if the encoder gets further ahead.
 
 ## Message contract
 
@@ -91,6 +90,12 @@ encoding, units and capture metadata across the node boundary.
 uv run --frozen pytest tests -q
 bash scripts/build_pyinstaller.sh
 ```
+
+The binary build needs CMake, a C/C++ toolchain, pkg-config, and access to the
+pinned Orbbec SDK source. To test the native patch from a Linux Python checkout,
+run `bash scripts/build_native_sdk.sh build/native-sdk` and launch the camera
+with `LD_PRELOAD` set to the absolute path to `build/native-sdk/lib/libOrbbecSDK.so.2`.
+A regular `uv sync` installs the upstream wheel.
 
 Use the committed `uv.lock` and frozen/locked installs. Python vendor SDK tests require
 the supported SDK platform. For Linux headless MuJoCo rendering, install the required

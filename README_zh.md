@@ -120,12 +120,15 @@ Python 独立示例见 `examples/python_list_devices` 和
 主动关闭时先关闭相机，再丢弃待发送的图像包，避免未读取的大尺寸 RGBD 队列
 阻塞子进程退出。强制终止会记录日志；仍无法停止的后端会抛出错误。
 
-这些生命周期检查不修复厂商 SDK 的 `Update data size > data buffer size` 报错，
-也不证明硬件 D2C profile 不兼容。应保留 SDK 缓冲区校验，持续故障仍需在
-SDK/设备层继续定位。
-运行时固定 `pyorbbecsdk2==2.1.3`。测试设备上，2.1.2 的 Dora RGBD 流曾在
-首帧后停滞，而 2.1.3 连续输出超过一分钟；原生缓冲区警告仍可能出现，不能据此
-认定厂商问题已彻底修复。
+Linux 二进制使用 `pyorbbecsdk2==2.1.3` 的 Python 绑定，并从固定的 SDK 2.10.6
+源码构建带补丁的原生库。补丁在 Gemini 2 的 bulk Y16 路径验证 UVC 包头及帧长度，
+关闭流时记录被拒绝的包和帧数。发布端每个 tick 最多发一组图像，最多缓存两组已编码
+图像，缓存满时丢弃最旧的一组。
+
+构建二进制需要 CMake、C/C++ 工具链、pkg-config 和 SDK 源码访问权限。Linux 源码
+调试可运行 `bash scripts/build_native_sdk.sh build/native-sdk`，并将相机进程的
+`LD_PRELOAD` 设为 `build/native-sdk/lib/libOrbbecSDK.so.2` 的绝对路径。
+常规 `uv sync` 安装公开 wheel。
 
 ## 输出语义
 
