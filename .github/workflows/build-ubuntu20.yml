@@ -67,8 +67,10 @@ jobs:
 
       - name: Verify tag ancestry
         run: |
-          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/${BUILD_REF}^{commit}")"
-          git merge-base --is-ancestor HEAD "${GITHUB_SHA}"
+          checked_out="$(git -c safe.directory="${GITHUB_WORKSPACE}" rev-parse HEAD)"
+          tagged="$(git -c safe.directory="${GITHUB_WORKSPACE}" rev-parse "refs/tags/${BUILD_REF}^{commit}")"
+          test "${checked_out}" = "${tagged}"
+          git -c safe.directory="${GITHUB_WORKSPACE}" merge-base --is-ancestor "${tagged}" "${GITHUB_SHA}"
 
       - name: Install uv and Python 3.12
         run: |
