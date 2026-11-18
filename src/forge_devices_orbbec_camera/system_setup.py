@@ -118,6 +118,7 @@ def _orbbec_device_nodes(
     *,
     sys_usb_root: Path = Path("/sys/bus/usb/devices"),
     dev_usb_root: Path = Path("/dev/bus/usb"),
+    serial: str | None = None,
 ) -> tuple[Path, ...]:
     nodes: set[Path] = set()
     try:
@@ -126,6 +127,8 @@ def _orbbec_device_nodes(
         return ()
     for candidate in candidates:
         if _read_text(candidate / "idVendor") != _ORBBEC_VENDOR_ID:
+            continue
+        if serial is not None and _read_text(candidate / "serial") != serial.lower():
             continue
         bus_text = _read_text(candidate / "busnum")
         device_text = _read_text(candidate / "devnum")
@@ -136,6 +139,12 @@ def _orbbec_device_nodes(
             continue
         nodes.add(dev_usb_root / f"{bus_number:03d}" / f"{device_number:03d}")
     return tuple(sorted(nodes))
+
+
+def find_orbbec_usb_device_node(serial: str) -> Path | None:
+    """Resolve an explicitly selected USB camera to its current Linux address."""
+    nodes = _orbbec_device_nodes(serial=serial)
+    return nodes[0] if len(nodes) == 1 and nodes[0].exists() else None
 
 
 def _group_status(uid: int) -> tuple[str, bool, bool, bool]:

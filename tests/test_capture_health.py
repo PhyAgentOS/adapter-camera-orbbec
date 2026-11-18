@@ -146,12 +146,32 @@ def _proxy():
     proxy._last_frame_at = 0.0
     proxy._recovering_until = None
     proxy._recover_min_seq = -1
+    proxy._usb_device_node = None
     proxy._frame_queue = queue.Queue()
     proxy._status_queue = queue.Queue()
     proxy._stop_event = threading.Event()
     proxy._process = mock.Mock()
     proxy._process.is_alive.return_value = True
     return proxy
+
+
+def test_proxy_reports_usb_disconnect_before_frame_timeout(tmp_path) -> None:
+    proxy = _proxy()
+    device = tmp_path / "033"
+    device.touch()
+    proxy._usb_device_node = device
+    proxy._next_usb_check = 0.0
+    proxy._config.device_serial = "AY6Z363011Y"
+    with mock.patch.object(isolated_backend.time, "monotonic", return_value=0.2):
+        proxy._check_capture_state()
+    device.unlink()
+    with (
+        mock.patch.object(isolated_backend.time, "monotonic", return_value=0.5),
+        pytest.raises(RuntimeError, match="AY6Z363011Y.*已断开"),
+    ):
+        proxy._check_capture_state()
+    assert proxy._latest_frame is None
+    assert proxy._stop_event.is_set()
 
 
 def test_proxy_rejects_stale_cache_even_when_worker_still_alive() -> None:

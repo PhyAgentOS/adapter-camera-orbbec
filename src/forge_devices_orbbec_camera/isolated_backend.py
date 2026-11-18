@@ -23,6 +23,7 @@ from .backend import (
     OrbbeFrame,
 )
 from .config import OrbbecConfig
+from .system_setup import find_orbbec_usb_device_node
 
 logger = get_logger(__name__)
 
@@ -182,6 +183,12 @@ class IsolatedOrbbecBackend:
         self._last_frame_at: float | None = None
         self._recovering_until: float | None = None
         self._recover_min_seq = -1
+        self._usb_device_node = (
+            find_orbbec_usb_device_node(config.device_serial)
+            if config.device_serial
+            else None
+        )
+        self._next_usb_check = 0.0
         self._ctx = mp.get_context("spawn")
         self._frame_queue: Queue = self._ctx.Queue(maxsize=2)
         self._status_queue: Queue = self._ctx.Queue(maxsize=8)
@@ -260,6 +267,7 @@ class IsolatedOrbbecBackend:
                 continue
             self._accept_packet(packet)
             self._drain_frames()
+            self._check_capture_state()
             if self._latest_seq > after_seq:
                 assert self._latest_frame is not None
                 return self._latest_frame, self._latest_seq
@@ -295,6 +303,7 @@ class IsolatedOrbbecBackend:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             self._raise_if_worker_failed(allow_starting=True)
+            self._check_capture_state()
             try:
                 status, message = self._status_queue.get(timeout=0.2)
             except queue.Empty:
@@ -347,11 +356,29 @@ class IsolatedOrbbecBackend:
                 )
 
     def _check_capture_state(self) -> None:
-        if self._terminal_error is None and self._last_frame_at is not None:
+        now = None
+        if self._terminal_error is None and (
+            self._last_frame_at is not None or self._usb_device_node is not None
+        ):
             now = time.monotonic()
-        else:
-            now = None
-        if now is not None and now - self._last_frame_at >= _FRAME_STALL_TIMEOUT_SEC:
+        if (
+            now is not None
+            and self._usb_device_node is not None
+            and now >= self._next_usb_check
+        ):
+            self._next_usb_check = now + 0.25
+            if not self._usb_device_node.exists():
+                self._terminal_error = (
+                    f"USB 相机 {self._config.device_serial!r} 已断开 "
+                    f"({self._usb_device_node})，请重新连接后重启节点"
+                )
+                self._stop_event.set()
+        if (
+            self._terminal_error is None
+            and now is not None
+            and self._last_frame_at is not None
+            and now - self._last_frame_at >= _FRAME_STALL_TIMEOUT_SEC
+        ):
             self._latest_frame = None
             if self._recovering_until is None and now < (
                 self._last_frame_at

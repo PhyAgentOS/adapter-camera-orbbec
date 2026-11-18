@@ -73,6 +73,8 @@ The Linux binary build uses the Python bindings from `pyorbbecsdk2==2.1.3`
 and compiles the pinned native SDK 2.10.6 with a Gemini 2 bulk Y16 patch.
 The patch checks UVC headers and frame sizes before handing frames to the SDK.
 The SDK logs rejected payload and frame counts on shutdown.
+With an explicit USB serial, isolated mode reports a disconnect when the
+original device address disappears, including during USB re-enumeration.
 Each tick publishes at most one RGBD set. The publisher retains two encoded
 sets and drops the oldest if the encoder gets further ahead.
 
