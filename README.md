@@ -47,18 +47,23 @@ stream profiles before starting. This command requires an appropriate Dora dataf
 
 ## Capture readiness and failures
 
-`init_timeout_sec` bounds SDK initialization, stream setup, `prewarm_frames` and
-receipt of the first usable frame. Readiness requires color (RGB or JPEG) plus
-all enabled depth/IR streams; optional point-cloud conversion does not block it.
+`init_timeout_sec` bounds each SDK initialization attempt, stream setup,
+`prewarm_frames` and receipt of the first usable frame. Readiness requires
+color (RGB or JPEG) plus all enabled depth/IR streams; optional point-cloud
+conversion does not block it.
 In `capture_process: isolated` mode, the worker reports ready only after queuing
-that first frame. The parent allows another 5 seconds for process startup/IPC.
+that first frame. It can reopen the Pipeline twice after recoverable failures,
+with a 1-second pause. The parent's total startup deadline covers all three
+attempts plus another 5 seconds for process startup/IPC.
 
-After readiness, 5 seconds without a complete usable frame is a terminal capture
-failure. Empty or incomplete frames do not refresh this deadline. Readers reject
-old cached frames, and the Dora node exits with an error instead of remaining
-silently stalled. The isolated proxy also checks for a worker that stays alive
-without delivering new frame sequences. A short `wait_new_frame` timeout may
-still return the current frame with its unchanged sequence before that deadline.
+After readiness, 5 seconds without a complete usable frame triggers a Pipeline
+reopen. Empty or incomplete frames do not refresh this deadline. Readers reject
+old cached frames while recovery is in progress, and frame sequences remain
+monotonic across reopens. The worker can retry twice within a short failure
+period; its retry budget resets after 60 seconds of healthy delivery. Device
+disconnects and exhausted retries remain errors. A short `wait_new_frame`
+timeout may still return the current frame with its unchanged sequence before
+the stall deadline.
 
 Shutdown closes the camera before discarding pending image packets, so an unread
 large RGBD packet cannot hold the worker open on a requested stop. Forced process

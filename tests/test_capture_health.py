@@ -1,4 +1,5 @@
 """Capture lifecycle regressions; no USB device is opened by these tests."""
+
 from __future__ import annotations
 
 import multiprocessing as mp
@@ -71,7 +72,9 @@ def test_jpeg_fast_path_and_disabled_streams_allow_readiness() -> None:
 
 
 @pytest.mark.parametrize("invalid_frameset", [False, True])
-def test_post_first_frame_stall_terminates_on_empty_or_invalid_frames(invalid_frameset) -> None:
+def test_post_first_frame_stall_terminates_on_empty_or_invalid_frames(
+    invalid_frameset,
+) -> None:
     now = [0.0]
     pipeline = mock.Mock()
     backend = fixtures.BackendLifecycleTests._loop_backend(OrbbecConfig(), pipeline)
@@ -86,7 +89,9 @@ def test_post_first_frame_stall_terminates_on_empty_or_invalid_frames(invalid_fr
     backend._convert_frameset = mock.Mock(
         side_effect=[_frame()] + [OrbbeFrame(None, None, None)] * 3
     )
-    with mock.patch.object(backend_orbbec.time, "monotonic", side_effect=lambda: now[0]):
+    with mock.patch.object(
+        backend_orbbec.time, "monotonic", side_effect=lambda: now[0]
+    ):
         backend._capture_loop()
     assert "5s" in backend._terminal_error
     assert backend._latest_frame is None
@@ -130,13 +135,17 @@ def test_close_reports_thread_that_did_not_stop() -> None:
 
 
 def _proxy():
-    proxy = isolated_backend.IsolatedOrbbecBackend.__new__(isolated_backend.IsolatedOrbbecBackend)
+    proxy = isolated_backend.IsolatedOrbbecBackend.__new__(
+        isolated_backend.IsolatedOrbbecBackend
+    )
     proxy._closed = False
     proxy._config = OrbbecConfig()
     proxy._terminal_error = None
     proxy._latest_frame = _frame()
     proxy._latest_seq = 1
     proxy._last_frame_at = 0.0
+    proxy._recovering_until = None
+    proxy._recover_min_seq = -1
     proxy._frame_queue = queue.Queue()
     proxy._status_queue = queue.Queue()
     proxy._stop_event = threading.Event()
@@ -150,9 +159,14 @@ def test_proxy_rejects_stale_cache_even_when_worker_still_alive() -> None:
     # Repeated sequence numbers must not refresh the watchdog.
     proxy._frame_queue.put((1, _frame()))
     with mock.patch.object(isolated_backend.time, "monotonic", return_value=5.0):
-        with pytest.raises(RuntimeError, match="5s"):
+        proxy._drain_frames()
+        proxy._check_capture_state()
+    assert proxy._latest_frame is None
+    assert not proxy._stop_event.is_set()
+    with mock.patch.object(isolated_backend.time, "monotonic", return_value=5.76):
+        with pytest.raises(RuntimeError, match="采集重试后"):
             proxy.capture_frame()
-        with pytest.raises(RuntimeError, match="5s"):
+        with pytest.raises(RuntimeError, match="采集重试后"):
             proxy.wait_new_frame(0, 0)
     assert proxy._latest_frame is None
     assert proxy._stop_event.is_set()
@@ -175,14 +189,160 @@ def test_failed_first_frame_never_reports_ready_and_cleans_up() -> None:
     stop = threading.Event()
     with (
         mock.patch.object(backend_orbbec, "OrbbecBackend", return_value=camera),
+        mock.patch.object(isolated_backend, "_CAPTURE_RESTART_BACKOFF_SEC", 0.0),
         pytest.raises(RuntimeError, match="no valid first frame"),
     ):
         isolated_backend._capture_worker(OrbbecConfig(), frames, statuses, stop)
+    assert statuses.get_nowait() == ("recovering", "0")
+    assert statuses.get_nowait() == ("recovering", "0")
     assert statuses.get_nowait() == ("error", "no valid first frame")
     assert statuses.empty()
-    camera.close.assert_called_once_with()
+    assert camera.close.call_count == 3
     frames.cancel_join_thread.assert_not_called()
     frames.close.assert_called_once_with()
+
+
+def test_worker_reopens_pipeline_and_keeps_sequence_monotonic_after_stall() -> None:
+    first, second = mock.Mock(), mock.Mock()
+    first.wait_new_frame.side_effect = [
+        (_frame(), 1),
+        RuntimeError("连续 5s 未收到完整有效帧"),
+    ]
+    stop = threading.Event()
+
+    def recovered_frame(*_args, **_kwargs):
+        stop.set()
+        return _frame(), 1
+
+    second.wait_new_frame.side_effect = recovered_frame
+    frames, statuses = queue.Queue(), queue.Queue()
+    frames.close = mock.Mock()
+    frames.cancel_join_thread = mock.Mock()
+    with (
+        mock.patch.object(
+            backend_orbbec, "OrbbecBackend", side_effect=[first, second]
+        ) as build,
+        mock.patch.object(isolated_backend, "_CAPTURE_RESTART_BACKOFF_SEC", 0.0),
+    ):
+        isolated_backend._capture_worker(OrbbecConfig(), frames, statuses, stop)
+
+    assert build.call_count == 2
+    assert [frames.get_nowait()[0], frames.get_nowait()[0]] == [1, 2]
+    assert statuses.get_nowait() == ("ready", "")
+    assert statuses.get_nowait() == ("recovering", "1")
+    assert statuses.empty()
+    first.close.assert_called_once_with()
+    second.close.assert_called_once_with()
+
+
+def test_proxy_drops_queued_frames_from_failed_pipeline() -> None:
+    proxy = _proxy()
+    proxy._status_queue.put(("recovering", "2"))
+    proxy._frame_queue.put((2, _frame()))
+    proxy._drain_status()
+    proxy._drain_frames()
+    assert proxy._latest_frame is None
+    assert proxy._recover_min_seq == 2
+    proxy._frame_queue.put((3, _frame()))
+    proxy._drain_frames()
+    assert proxy._latest_seq == 3
+    assert proxy._latest_frame is not None
+    assert proxy._recovering_until is None
+
+
+def test_late_recovery_status_does_not_erase_newer_frame() -> None:
+    proxy = _proxy()
+    proxy._frame_queue.put((2, _frame()))
+    proxy._drain_frames()
+    proxy._status_queue.put(("recovering", "1"))
+    proxy._drain_status()
+    assert proxy._latest_seq == 2
+    assert proxy._latest_frame is not None
+    assert proxy._recovering_until is None
+
+
+def test_first_frame_failure_reopens_before_reporting_ready() -> None:
+    failed, healthy = mock.Mock(), mock.Mock()
+    failed.wait_new_frame.side_effect = RuntimeError("no valid first frame")
+    stop = threading.Event()
+
+    def healthy_frame(*_args, **_kwargs):
+        stop.set()
+        return _frame(), 1
+
+    healthy.wait_new_frame.side_effect = healthy_frame
+    frames, statuses = queue.Queue(), queue.Queue()
+    frames.close = mock.Mock()
+    frames.cancel_join_thread = mock.Mock()
+    with (
+        mock.patch.object(
+            backend_orbbec, "OrbbecBackend", side_effect=[failed, healthy]
+        ),
+        mock.patch.object(isolated_backend, "_CAPTURE_RESTART_BACKOFF_SEC", 0.0),
+    ):
+        isolated_backend._capture_worker(OrbbecConfig(), frames, statuses, stop)
+    assert statuses.get_nowait() == ("recovering", "0")
+    assert statuses.get_nowait() == ("ready", "")
+    assert frames.get_nowait()[0] == 1
+    failed.close.assert_called_once_with()
+    healthy.close.assert_called_once_with()
+
+
+def test_disconnected_device_does_not_restart() -> None:
+    camera = mock.Mock()
+    camera.wait_new_frame.side_effect = RuntimeError("device disconnected")
+    frames, statuses = mock.Mock(), queue.Queue()
+    stop = threading.Event()
+    with (
+        mock.patch.object(
+            backend_orbbec, "OrbbecBackend", return_value=camera
+        ) as build,
+        pytest.raises(RuntimeError, match="device disconnected"),
+    ):
+        isolated_backend._capture_worker(OrbbecConfig(), frames, statuses, stop)
+    build.assert_called_once()
+    assert statuses.get_nowait() == ("error", "device disconnected")
+    camera.close.assert_called_once_with()
+
+
+def test_restart_budget_recovers_after_a_stable_stream() -> None:
+    first, stable, third, recovered = (mock.Mock() for _ in range(4))
+    first.wait_new_frame.side_effect = RuntimeError("first start failed")
+    stable.wait_new_frame.side_effect = [
+        (_frame(), 1),
+        (_frame(), 2),
+        RuntimeError("second stall"),
+    ]
+    third.wait_new_frame.side_effect = RuntimeError("third start failed")
+    stop = threading.Event()
+
+    def final_frame(*_args, **_kwargs):
+        stop.set()
+        return _frame(), 1
+
+    recovered.wait_new_frame.side_effect = final_frame
+    frames, statuses = queue.Queue(), queue.Queue()
+    frames.close = mock.Mock()
+    frames.cancel_join_thread = mock.Mock()
+    with (
+        mock.patch.object(
+            backend_orbbec,
+            "OrbbecBackend",
+            side_effect=[first, stable, third, recovered],
+        ) as build,
+        mock.patch.object(isolated_backend, "_CAPTURE_RESTART_BACKOFF_SEC", 0.0),
+        mock.patch.object(isolated_backend, "_CAPTURE_STABLE_RESET_SEC", 0.0),
+    ):
+        isolated_backend._capture_worker(OrbbecConfig(), frames, statuses, stop)
+
+    assert build.call_count == 4
+    assert [frames.get_nowait()[0] for _ in range(3)] == [1, 2, 3]
+    assert [statuses.get_nowait()[0] for _ in range(4)] == [
+        "recovering",
+        "ready",
+        "recovering",
+        "recovering",
+    ]
 
 
 def _worker_with_pending_rgbd(frames, statuses, stop, cleaned):
@@ -190,7 +350,8 @@ def _worker_with_pending_rgbd(frames, statuses, stop, cleaned):
     camera = mock.Mock()
     frame = OrbbeFrame(
         np.zeros((720, 1280, 3), dtype=np.uint8),
-        np.ones((720, 1280), dtype=np.float32), None,
+        np.ones((720, 1280), dtype=np.float32),
+        None,
     )
 
     def wait(*_args, **_kwargs):
@@ -207,7 +368,9 @@ def test_worker_exits_with_unread_large_frame_after_camera_cleanup() -> None:
     ctx = mp.get_context("spawn")
     frames, statuses = ctx.Queue(maxsize=2), ctx.Queue(maxsize=8)
     stop, cleaned = ctx.Event(), ctx.Event()
-    worker = ctx.Process(target=_worker_with_pending_rgbd, args=(frames, statuses, stop, cleaned))
+    worker = ctx.Process(
+        target=_worker_with_pending_rgbd, args=(frames, statuses, stop, cleaned)
+    )
     try:
         worker.start()
         assert statuses.get(timeout=15.0) == ("ready", "")
