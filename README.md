@@ -68,6 +68,9 @@ Pillow 12.3.0 安全问题。
 
 这些生命周期检查不会修复 SDK 的 `Update data size > data buffer size` 错误，
 也不能证明 D2C profile 不兼容。持续出现时需检查 SDK、设备和固件。
+当前依赖固定 `pyorbbecsdk2==2.1.3`；在测试设备上，旧版 2.1.2 的 Dora
+RGBD 数据流曾在首帧后停滞，而 2.1.3 连续输出超过一分钟。SDK 原生日志仍可能
+报告缓冲区错误，因此升级 SDK 不等同于厂商问题已根治。
 
 ## 基础命令
 
