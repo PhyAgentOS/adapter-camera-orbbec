@@ -57,6 +57,7 @@ def _point_cloud_proxy() -> IsolatedOrbbecBackend:
     isolated._latest_frame = None
     isolated._latest_seq = -1
     isolated._recover_min_seq = -1
+    isolated._usb_device_node = None
     isolated._recovering_until = None
     return isolated
 
@@ -154,6 +155,7 @@ def test_proxy_expands_short_timeout_while_waiting_for_first_frame() -> None:
     isolated._terminal_error = None
     isolated._last_frame_at = None
     isolated._recover_min_seq = -1
+    isolated._usb_device_node = None
     isolated._recovering_until = None
     isolated._frame_queue = mock.Mock()
     isolated._frame_queue.get_nowait.side_effect = queue.Empty
@@ -182,6 +184,7 @@ def test_wait_new_frame_returns_newest_sequence() -> None:
     isolated._terminal_error = None
     isolated._last_frame_at = None
     isolated._recover_min_seq = -1
+    isolated._usb_device_node = None
     isolated._recovering_until = None
     isolated._frame_queue = queue.Queue()
     isolated._status_queue = queue.Queue()
@@ -267,6 +270,7 @@ def test_wait_new_frame_surfaces_worker_error() -> None:
     isolated._terminal_error = None
     isolated._last_frame_at = None
     isolated._recover_min_seq = -1
+    isolated._usb_device_node = None
     isolated._recovering_until = None
     isolated._frame_queue = queue.Queue()
     isolated._status_queue = queue.Queue()
