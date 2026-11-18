@@ -14,9 +14,8 @@ Orbbec Gemini RGB, metric depth, infrared and optional organized point-cloud cap
 
 ## Migration status
 
-Target node version: **2.0.0**. These changes are candidates pending the platform,
-hardware and sustained-stream acceptance gates below. A version declaration does not
-mean a stable release has been accepted.
+Node version: **2.0.1**. This Forge 2 patch remains in the prerelease channel while
+sustained-stream and full-system acceptance are pending.
 
 Startup failures now close the capture backend and observer, including failed Dora registration and encoder-thread startup. Encoder failures terminate the node instead of leaving a stalled stream.
 

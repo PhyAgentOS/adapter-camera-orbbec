@@ -22,13 +22,13 @@ jobs:
       image: ubuntu:20.04
     env:
       RELEASE_VERSION: ${{ inputs.version }}
+      BUILD_REF: ${{ inputs.ref }}
     steps:
       - name: Install system tools
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y \
             binutils \
-            build-essential \
             build-essential \
             ca-certificates \
             cmake \
@@ -69,9 +69,9 @@ jobs:
 
       - name: Verify and package binary
         run: |
-          test "${{ inputs.ref }}" = "v${RELEASE_VERSION}"
+          test "${BUILD_REF}" = "v${RELEASE_VERSION}"
           ./dist/orbbec_camera --version | tee /tmp/version.txt
-          grep -q "${RELEASE_VERSION}" /tmp/version.txt
+          grep -Fx "orbbec-camera ${RELEASE_VERSION}" /tmp/version.txt
           file ./dist/orbbec_camera
           ldd --version | sed -n '1p'
           archive="orbbec_camera-v${RELEASE_VERSION}-ubuntu20.04-x86_64.tar.gz"
