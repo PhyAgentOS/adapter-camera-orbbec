@@ -67,6 +67,10 @@ termination is logged; a backend that still cannot stop raises an error.
 These lifecycle checks do not fix the vendor SDK's `Update data size > data buffer
 size` error or establish hardware D2C profile incompatibility. Keep SDK buffer
 validation enabled; a persistent failure needs SDK/device-level investigation.
+The runtime pins `pyorbbecsdk2==2.1.3`. On the tested Gemini 2, a Dora RGBD
+flow with 2.1.2 stalled after its first frame, while 2.1.3 sustained more
+than one minute of paired images. Native buffer warnings can still occur; this
+SDK update does not establish that the vendor fault is fully fixed.
 
 ## Message contract
 

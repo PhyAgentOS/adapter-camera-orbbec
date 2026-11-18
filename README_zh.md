@@ -122,6 +122,9 @@ Python 独立示例见 `examples/python_list_devices` 和
 这些生命周期检查不修复厂商 SDK 的 `Update data size > data buffer size` 报错，
 也不证明硬件 D2C profile 不兼容。应保留 SDK 缓冲区校验，持续故障仍需在
 SDK/设备层继续定位。
+运行时固定 `pyorbbecsdk2==2.1.3`。测试设备上，2.1.2 的 Dora RGBD 流曾在
+首帧后停滞，而 2.1.3 连续输出超过一分钟；原生缓冲区警告仍可能出现，不能据此
+认定厂商问题已彻底修复。
 
 ## 输出语义
 
