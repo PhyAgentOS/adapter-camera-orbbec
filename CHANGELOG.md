@@ -6,6 +6,19 @@ The project follows Semantic Versioning. Dates use the `YYYY-MM-DD` format.
 
 ## Unreleased
 
+## 1.1.1 - 2026-11-18
+
+### Fixed
+
+- Validate Gemini 2 bulk Y16 payload headers and frame lengths in the bundled Orbbec SDK before passing depth frames to the capture pipeline.
+- Require a complete first frame set, retry temporary capture failures with bounded backoff, and report the loss of a USB camera selected by serial.
+- Retain two encoded frame sets to absorb Dora tick jitter and allow clean shutdown with unread frames.
+
+### Changed
+
+- Pin the Python camera bindings to `pyorbbecsdk2==2.1.3`. Linux executables build and bundle the patched native SDK 2.10.6.
+- Keep this release on Dora 0.4.1 and the corresponding Forge dependency line on `stable/1.x`.
+
 ## 1.1.0 - 2026-08-24
 
 ### Added
