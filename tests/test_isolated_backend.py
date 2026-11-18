@@ -3,6 +3,7 @@ from __future__ import annotations
 import multiprocessing as mp
 import pickle
 import queue
+import threading
 from unittest import mock
 
 import numpy as np
@@ -113,11 +114,17 @@ def test_capture_worker_uses_init_timeout_for_first_frame() -> None:
     config = OrbbecConfig(init_timeout_sec=3.0)
     expected = OrbbeFrame(color=None, depth=None, ir=None, timestamp_ms=1)
     capture_backend = mock.Mock()
-    capture_backend.wait_new_frame.return_value = (expected, 1)
-    frame_queue: queue.Queue = queue.Queue(maxsize=2)
+    def first_frame(*_args, **_kwargs):
+        assert status_queue.empty(), "ready must follow a usable first frame"
+        stop_event.set()
+        return expected, 1
+
+    capture_backend.wait_new_frame.side_effect = first_frame
+    frame_queue = mock.Mock(wraps=queue.Queue(maxsize=2))
+    frame_queue.cancel_join_thread = mock.Mock()
+    frame_queue.close = mock.Mock()
     status_queue: queue.Queue = queue.Queue(maxsize=8)
-    stop_event = mock.Mock()
-    stop_event.is_set.side_effect = [False, True]
+    stop_event = threading.Event()
 
     with mock.patch(
         "forge_devices_orbbec_camera.backend_orbbec.OrbbecBackend",
@@ -131,6 +138,8 @@ def test_capture_worker_uses_init_timeout_for_first_frame() -> None:
     seq, frame = frame_queue.get_nowait()
     assert seq == 1
     assert frame is expected
+    frame_queue.cancel_join_thread.assert_called_once_with()
+    frame_queue.close.assert_called_once_with()
 
 
 def test_proxy_expands_short_timeout_while_waiting_for_first_frame() -> None:
@@ -139,6 +148,8 @@ def test_proxy_expands_short_timeout_while_waiting_for_first_frame() -> None:
     isolated._latest_frame = None
     isolated._latest_seq = -1
     isolated._closed = False
+    isolated._terminal_error = None
+    isolated._last_frame_at = None
     isolated._frame_queue = mock.Mock()
     isolated._frame_queue.get_nowait.side_effect = queue.Empty
     isolated._frame_queue.get.side_effect = queue.Empty
@@ -163,6 +174,8 @@ def test_wait_new_frame_returns_newest_sequence() -> None:
     isolated._latest_frame = None
     isolated._latest_seq = -1
     isolated._closed = False
+    isolated._terminal_error = None
+    isolated._last_frame_at = None
     isolated._frame_queue = queue.Queue()
     isolated._status_queue = queue.Queue()
     isolated._process = mock.Mock()
@@ -244,6 +257,8 @@ def test_wait_new_frame_surfaces_worker_error() -> None:
     isolated._latest_frame = None
     isolated._latest_seq = -1
     isolated._closed = False
+    isolated._terminal_error = None
+    isolated._last_frame_at = None
     isolated._frame_queue = queue.Queue()
     isolated._status_queue = queue.Queue()
     isolated._status_queue.put_nowait(("error", "camera disconnected"))

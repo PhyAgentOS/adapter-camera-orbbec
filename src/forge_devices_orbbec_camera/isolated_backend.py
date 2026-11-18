@@ -14,10 +14,13 @@ from multiprocessing.queues import Queue
 from typing import Any
 
 import numpy as np
+from forge_common import get_logger
 
-from .backend import CaptureBackend, OrbbeFrame, OrbbecPointCloud
+from .backend import CaptureBackend, OrbbeFrame, OrbbecPointCloud, _FRAME_STALL_TIMEOUT_SEC
 from .config import OrbbecConfig
 
+
+logger = get_logger(__name__)
 
 FramePacket = tuple[int, OrbbeFrame]
 
@@ -86,23 +89,31 @@ def _capture_worker(
         from .backend_orbbec import OrbbecBackend
 
         backend = OrbbecBackend(config)
-        _put_status(status_queue, "ready")
         after_seq = -1
         while not stop_event.is_set():
             timeout = max(float(config.init_timeout_sec), 0.5) if after_seq < 0 else 0.5
             frame, seq = backend.wait_new_frame(after_seq, timeout=timeout)
             if seq <= after_seq:
                 continue
-            after_seq = seq
             _put_latest(frame_queue, (seq, frame))
+            if after_seq < 0:
+                _put_status(status_queue, "ready")
+            after_seq = seq
     except KeyboardInterrupt:
         _put_status(status_queue, "stopped")
     except BaseException as exc:  # native SDK wrappers can raise broad types
         _put_status(status_queue, "error", str(exc))
         raise
     finally:
-        if backend is not None:
-            backend.close()
+        try:
+            if backend is not None:
+                backend.close()
+        finally:
+            # Only discard packets on requested shutdown: an active reader may
+            # otherwise be halfway through receiving one when capture fails.
+            if stop_event.is_set():
+                frame_queue.cancel_join_thread()
+            frame_queue.close()
 
 
 class IsolatedOrbbecBackend:
@@ -113,6 +124,8 @@ class IsolatedOrbbecBackend:
         self._latest_frame: OrbbeFrame | None = None
         self._latest_seq = -1
         self._closed = False
+        self._terminal_error: str | None = None
+        self._last_frame_at: float | None = None
         self._ctx = mp.get_context("spawn")
         self._frame_queue: Queue = self._ctx.Queue(maxsize=2)
         self._status_queue: Queue = self._ctx.Queue(maxsize=8)
@@ -140,6 +153,7 @@ class IsolatedOrbbecBackend:
         self._raise_if_worker_failed()
         self._drain_status()
         self._drain_frames()
+        self._check_capture_state()
         if self._latest_frame is not None:
             return self._latest_frame
         frame, _ = self.wait_new_frame(-1, timeout=float(self._config.init_timeout_sec))
@@ -154,6 +168,7 @@ class IsolatedOrbbecBackend:
         self._raise_if_worker_failed()
         self._drain_status()
         self._drain_frames()
+        self._check_capture_state()
         if self._latest_frame is not None and self._latest_seq > after_seq:
             return self._latest_frame, self._latest_seq
 
@@ -163,6 +178,8 @@ class IsolatedOrbbecBackend:
         deadline = time.monotonic() + effective_timeout
         while True:
             self._raise_if_worker_failed()
+            self._drain_status()
+            self._check_capture_state()
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 if self._latest_frame is None:
@@ -183,15 +200,20 @@ class IsolatedOrbbecBackend:
         if self._closed:
             return
         self._closed = True
+        self._latest_frame = None
         self._stop_event.set()
         if self._process.is_alive():
             self._process.join(timeout=3.0)
         if self._process.is_alive():
+            logger.warning("[orbbec_camera] 采集子进程未及时停止，发送 terminate")
             self._process.terminate()
             self._process.join(timeout=2.0)
         if self._process.is_alive():
+            logger.warning("[orbbec_camera] 采集子进程仍未停止，发送 kill")
             self._process.kill()
             self._process.join(timeout=1.0)
+        if self._process.is_alive():
+            raise RuntimeError("Orbbec 子进程未能停止，设备资源可能尚未释放")
         self._close_queue(self._frame_queue)
         self._close_queue(self._status_queue)
 
@@ -220,7 +242,8 @@ class IsolatedOrbbecBackend:
 
     def _accept_packet(self, packet: FramePacket) -> None:
         seq, frame = packet
-        if int(seq) >= self._latest_seq:
+        if int(seq) > self._latest_seq:
+            self._last_frame_at = time.monotonic()
             if frame.point_cloud is not None:
                 frame.point_cloud = _freeze_received_point_cloud(frame.point_cloud)
             self._latest_seq = int(seq)
@@ -233,7 +256,22 @@ class IsolatedOrbbecBackend:
             except queue.Empty:
                 return
             if status == "error":
+                self._terminal_error = message
+                self._latest_frame = None
                 raise RuntimeError(f"Orbbec 子进程采集失败: {message}")
+
+    def _check_capture_state(self) -> None:
+        if (
+            self._terminal_error is None
+            and self._last_frame_at is not None
+            and time.monotonic() - self._last_frame_at >= _FRAME_STALL_TIMEOUT_SEC
+        ):
+            self._terminal_error = "连续 5s 未收到子进程新帧，采集终止"
+            self._latest_frame = None
+            self._stop_event.set()
+        if self._terminal_error is not None:
+            self._latest_frame = None
+            raise RuntimeError(f"Orbbec 子进程采集失败: {self._terminal_error}")
 
     def _raise_if_worker_failed(self, *, allow_starting: bool = False) -> None:
         if self._process.is_alive():

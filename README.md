@@ -48,6 +48,25 @@ privileged helper 只原子安装固定内嵌规则、将 `PKEXEC_UID` 对应的
 官方工具验证应先使用 Orbbec Viewer 或 SDK 官方示例确认设备、固件、流 profile
 和深度工作模式，再运行本项目。
 
+## 取流就绪与停滞处理
+
+此 Forge 1 分支固定使用 `dora-rs==0.4.1`、`forge-common==1.0.1` 和
+`forge-msgs==1.1.0`；相机节点应与 Dora 0.4.1 CLI/coordinator/daemon 一起运行。
+
+`init_timeout_sec` 覆盖 SDK 初始化、流配置、预热和首个完整帧。完整帧需包含彩色图像
+（RGB 或 JPEG）及所有启用的 Depth/IR 流；可选点云转换不影响就绪判断。隔离进程
+只有在首帧入队后才报告就绪，父进程另留 5 秒用于启动与 IPC。
+
+就绪后若连续 5 秒没有完整可用帧，采集会报错退出。空帧或缺失流的帧不能刷新计时；
+读取端不再无限返回旧帧。隔离进程仍存活但没有新帧序号时也会报错。短时
+`wait_new_frame` 超时可能返回序号不变的当前帧，不代表获得新帧。
+
+停止时会先关闭相机，再丢弃尚未读取的图像包，避免大 RGBD 消息阻塞队列退出。
+强制结束会记录日志，无法停止的后端会抛出错误。
+
+这些生命周期检查不会修复 SDK 的 `Update data size > data buffer size` 错误，
+也不能证明 D2C profile 不兼容。持续出现时需检查 SDK、设备和固件。
+
 ## 基础命令
 
 ```bash

@@ -19,6 +19,9 @@ if TYPE_CHECKING:
     from .config import OrbbecConfig
 
 
+_FRAME_STALL_TIMEOUT_SEC = 5.0
+
+
 @dataclass(frozen=True)
 class OrbbecPointCloud:
     """SDK-independent immutable columns for an organized point cloud."""
