@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from forge_devices_orbbec_camera import backend
-from forge_devices_orbbec_camera.backend import OrbbeFrame, OrbbecPointCloud
+from forge_devices_orbbec_camera.backend import OrbbecPointCloud, OrbbeFrame
 from forge_devices_orbbec_camera.config import OrbbecConfig
 from forge_devices_orbbec_camera.isolated_backend import (
     IsolatedOrbbecBackend,
@@ -56,6 +56,8 @@ def _point_cloud_proxy() -> IsolatedOrbbecBackend:
     isolated = IsolatedOrbbecBackend.__new__(IsolatedOrbbecBackend)
     isolated._latest_frame = None
     isolated._latest_seq = -1
+    isolated._recover_min_seq = -1
+    isolated._recovering_until = None
     return isolated
 
 
@@ -114,6 +116,7 @@ def test_capture_worker_uses_init_timeout_for_first_frame() -> None:
     config = OrbbecConfig(init_timeout_sec=3.0)
     expected = OrbbeFrame(color=None, depth=None, ir=None, timestamp_ms=1)
     capture_backend = mock.Mock()
+
     def first_frame(*_args, **_kwargs):
         assert status_queue.empty(), "ready must follow a usable first frame"
         stop_event.set()
@@ -150,6 +153,8 @@ def test_proxy_expands_short_timeout_while_waiting_for_first_frame() -> None:
     isolated._closed = False
     isolated._terminal_error = None
     isolated._last_frame_at = None
+    isolated._recover_min_seq = -1
+    isolated._recovering_until = None
     isolated._frame_queue = mock.Mock()
     isolated._frame_queue.get_nowait.side_effect = queue.Empty
     isolated._frame_queue.get.side_effect = queue.Empty
@@ -176,6 +181,8 @@ def test_wait_new_frame_returns_newest_sequence() -> None:
     isolated._closed = False
     isolated._terminal_error = None
     isolated._last_frame_at = None
+    isolated._recover_min_seq = -1
+    isolated._recovering_until = None
     isolated._frame_queue = queue.Queue()
     isolated._status_queue = queue.Queue()
     isolated._process = mock.Mock()
@@ -259,6 +266,8 @@ def test_wait_new_frame_surfaces_worker_error() -> None:
     isolated._closed = False
     isolated._terminal_error = None
     isolated._last_frame_at = None
+    isolated._recover_min_seq = -1
+    isolated._recovering_until = None
     isolated._frame_queue = queue.Queue()
     isolated._status_queue = queue.Queue()
     isolated._status_queue.put_nowait(("error", "camera disconnected"))
