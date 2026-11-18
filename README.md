@@ -24,10 +24,6 @@ Startup failures now close the capture backend and observer, including failed Do
 
 - First validation combination: Dora CLI/coordinator/daemon/node APIs 1.0.1,
   Forge Msgs 2.1.0 and Common 2.1.0; use only the families required by this node.
-- This camera-only dataflow has also been tested with Dora CLI/coordinator/daemon
-  and Python `dora-rs` 0.4.1. Keep all Dora components in a dataflow on the same
-  version; install `dora-rs==0.4.1` when running the 0.4.1 CLI, or
-  `dora-rs==1.0.1` when running the 1.0.1 CLI. The locked default is 1.0.1.
 - Forge wire schemas remain `forge_msgs.v1`. Dora 0.x and 1.x cannot share a runtime.
 - Use Python 3.12 for Python builds. Camera-only Python packages may also declare
   Python 3.11 support; test that interpreter separately before claiming it.
@@ -44,20 +40,6 @@ Run from the repository root:
 uv sync --frozen --python 3.12
 uv run --frozen orbbec-camera --config config/sensor.example.yaml
 ```
-
-For a Dora 0.4.1 camera-only flow, prepare a separate environment with the
-same locked camera dependencies, then select the matching Python binding:
-
-```sh
-UV_PROJECT_ENVIRONMENT=.venv-dora041 uv sync --frozen --python 3.12
-uv pip install --python .venv-dora041/bin/python --no-deps dora-rs==0.4.1
-uv pip check --python .venv-dora041/bin/python
-UV_PROJECT_ENVIRONMENT=.venv-dora041 UV_NO_SYNC=1 dora run --uv examples/dora_sensor_stream/dataflow.yaml
-```
-
-Here `dora` must be the 0.4.1 CLI. Use the 1.0.1 CLI with the default locked
-environment for the 1.0.1 flow. `UV_NO_SYNC=1` prevents `uv run` inside the
-dataflow from replacing the selected 0.4.1 binding with the lockfile default.
 
 Use `orbbec-camera --help` (or `uv run --frozen orbbec-camera --help`) for supported CLI options.
 The example configuration is `config/sensor.example.yaml`; choose the actual device and supported
@@ -105,15 +87,13 @@ Use the committed `uv.lock` and frozen/locked installs. Python vendor SDK tests 
 the supported SDK platform. For Linux headless MuJoCo rendering, install the required
 EGL or OSMesa libraries and select the appropriate `MUJOCO_GL` backend.
 
-With Dora 1.0.1, validate every delivered example or rendered template with:
+Validate every delivered example or rendered template with:
 
 ```sh
 dora validate path/to/dataflow.yaml
 ```
 
-Dora 0.4.1 has no `validate` subcommand; start the flow and verify message
-exchange and clean stop with that CLI. Schema validation on 1.0.1 is followed
-by the same real start, message exchange and stop test.
+Schema validation is followed by a real start, message exchange and stop test.
 Keep the existing detailed configuration and device setup reference in
 [the Chinese guide](README_zh.md) and the repository's `config/`, `examples/` and
 `scripts/` directories where present.

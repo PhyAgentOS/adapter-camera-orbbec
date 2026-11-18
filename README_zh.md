@@ -24,10 +24,8 @@ src layout：`src/forge_devices_orbbec_camera`。
 
 ## 安装与环境检查
 
-运行时依赖从公开 PyPI 解析，其中 `dora-rs>=0.4.1,<2`、`forge-common>=2.1.0,<3`、
-`forge-msgs>=2.1.0,<3`；发布与部署使用仓库中的 `uv.lock` 固定实际版本。
-本相机节点的独立 Dora 数据流已分别在 0.4.1 和 1.0.1 验证；同一数据流中的
-CLI/coordinator/daemon 与 Python `dora-rs` 必须使用相同版本。锁文件默认选择 1.0.1。
+运行时依赖从公开 PyPI 解析，其中 `dora-rs>=1.0.1,<2`、`forge-common>=2.1.0,<3`、
+`forge-msgs>=2.0.0,<3`；发布与部署使用仓库中的 `uv.lock` 固定实际版本。
 
 ```bash
 uv sync
@@ -81,19 +79,6 @@ uv run python examples/python_capture_sample/run_capture_sample.py \
 # Dora 节点
 uv run orbbec-camera --config config/sensor.example.yaml
 ```
-
-使用 Dora 0.4.1 CLI 时，为相机数据流准备单独环境，并选择匹配的 Python 绑定：
-
-```bash
-UV_PROJECT_ENVIRONMENT=.venv-dora041 uv sync --frozen --python 3.12
-uv pip install --python .venv-dora041/bin/python --no-deps dora-rs==0.4.1
-uv pip check --python .venv-dora041/bin/python
-UV_PROJECT_ENVIRONMENT=.venv-dora041 UV_NO_SYNC=1 dora run --uv examples/dora_sensor_stream/dataflow.yaml
-```
-
-`UV_NO_SYNC=1` 防止数据流中的 `uv run` 将 0.4.1 重新同步为锁文件默认的 1.0.1。
-Dora 1.0.1 CLI 使用默认锁定环境。此兼容性只针对相机节点及其独立数据流，
-不表示整个 Forge 1.x 部署可混用 Forge 2.x 节点。
 
 Python 独立示例见 `examples/python_list_devices` 和
 `examples/python_capture_sample`。Dora 的可消费链路见
@@ -247,7 +232,7 @@ USB 信息。
 
 目标版本：`2.0.0`，当前为待验收改动。首轮验证组合使用 Dora 1.0.1、Forge Msgs 2.1.0、Common 2.1.0；依赖与构建工具以提交的锁文件为准。原有消息规范继续使用 `forge_msgs.v1`。
 
-本轮要求：检查所有示例最终 YAML。Dora 1.0.1 使用 `dora validate <dataflow.yaml>` 验证；Dora 0.4.1 没有 `validate` 子命令，需直接启动数据流验证消息往返与正常退出。相机取流、资源释放和异常退出须分别验收；高吞吐图像链预热后连续测试至少 4 小时，覆盖慢消费者、扇出、退出与重启，记录实际内存占用。无硬件单测不能替代设备验收。
+本轮要求：检查所有示例最终 YAML，使用 `dora validate <dataflow.yaml>` 验证，并实际执行消息往返。相机取流、资源释放和异常退出须分别验收；高吞吐图像链预热后连续测试至少 4 小时，覆盖慢消费者、扇出、退出与重启，记录实际内存占用。无硬件单测不能替代设备验收。
 
 最终发布归档须先在声明支持的平台完成验收，记录源码与归档、可执行文件校验值；通过后发布同一份包，重建后重新验收。Linux 发布包仍需 Linux 验证，其他平台的开发测试不代表其已通过。
 
