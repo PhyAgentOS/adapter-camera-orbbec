@@ -24,7 +24,7 @@ import numpy as np
 
 import pyorbbecsdk as ob
 
-from .backend import DeviceInfo, OrbbeFrame, OrbbecPointCloud
+from .backend import DeviceInfo, OrbbeFrame, OrbbecPointCloud, _FRAME_STALL_TIMEOUT_SEC
 from .config import OrbbecConfig
 from forge_common import get_logger
 
@@ -267,6 +267,7 @@ class OrbbecBackend:
         self._init_done = threading.Event()
         self._init_error: str | None = None
         self._terminal_error: str | None = None
+        self._last_frame_at: float | None = None
         # SDK 后处理滤波链（在 _capture_loop 中初始化，每帧按序应用）
         self._depth_sdk_filters: list = []
         # 是否已通过硬件写入深度范围（True 则深度转换跳过软件裁剪）
@@ -289,8 +290,8 @@ class OrbbecBackend:
                 self._frame_cond.notify_all()
             self._thread.join(timeout=5.0)
             raise RuntimeError(
-                f"Orbbec 设备初始化超时 ({config.init_timeout_sec}s)，"
-                "请检查设备是否连接、udev 规则是否已配置。"
+                f"Orbbec 设备初始化超时 ({config.init_timeout_sec}s，包含预热和完整首帧)，"
+                "请检查流 profile、USB 连接及 udev 规则。"
             )
         if self._init_error:
             self._thread.join(timeout=5.0)
@@ -308,10 +309,8 @@ class OrbbecBackend:
             raise RuntimeError("等待 Orbbec 首帧超时（5s），设备可能无数据输出。")
 
         with self._lock:
-            terminal_error = self._terminal_error
+            self._check_capture_state()
             frame = self._latest_frame
-        if terminal_error is not None:
-            raise RuntimeError(f"Orbbec 采集已终止: {terminal_error}")
         if frame is None:
             raise RuntimeError("Orbbec 采集线程已退出，请检查设备是否断开。")
         return frame
@@ -326,8 +325,7 @@ class OrbbecBackend:
         deadline = time.monotonic() + max(timeout, 0.0)
         with self._frame_cond:
             while True:
-                if self._terminal_error is not None:
-                    raise RuntimeError(f"Orbbec 采集已终止: {self._terminal_error}")
+                self._check_capture_state()
                 if self._latest_frame is not None and self._frame_seq > after_seq:
                     return self._latest_frame, self._frame_seq
                 remaining = deadline - time.monotonic()
@@ -335,14 +333,43 @@ class OrbbecBackend:
                     if self._latest_frame is None:
                         raise RuntimeError("Orbbec 采集线程已退出，请检查设备是否断开。")
                     return self._latest_frame, self._frame_seq
-                self._frame_cond.wait(timeout=remaining)
+                self._frame_cond.wait(timeout=min(remaining, 0.5))
+
+    def _check_capture_state(self) -> None:
+        """Called with the frame lock held, including while the SDK is blocked."""
+        if (
+            self._terminal_error is None
+            and self._last_frame_at is not None
+            and time.monotonic() - self._last_frame_at >= _FRAME_STALL_TIMEOUT_SEC
+        ):
+            self._terminal_error = "连续 5s 未收到完整有效帧，采集终止"
+            self._latest_frame = None
+            self._stop_event.set()
+            self._frame_cond.notify_all()
+        if self._terminal_error is not None:
+            raise RuntimeError(f"Orbbec 采集已终止: {self._terminal_error}")
+        if self._stop_event.is_set():
+            raise RuntimeError("Orbbec 采集后端已关闭")
 
     def close(self) -> None:
         """停止采集线程，释放 Pipeline。"""
         self._stop_event.set()
         with self._frame_cond:
+            self._latest_frame = None
             self._frame_cond.notify_all()
+        self._first_frame_event.set()
         self._thread.join(timeout=5.0)
+        if self._thread.is_alive():
+            raise RuntimeError("Orbbec 采集线程未能停止，设备资源可能尚未释放")
+
+    def _has_required_streams(self, frame: OrbbeFrame) -> bool:
+        cfg = self._config
+        return (
+            (bool(frame.color_jpeg)
+             or (frame.color is not None and frame.color.size > 0))
+            and (not cfg.depth.enabled or (frame.depth is not None and frame.depth.size > 0))
+            and (not cfg.ir.enabled or (frame.ir is not None and frame.ir.size > 0))
+        )
 
     # ------------------------------------------------------------------
     # 内部：采集线程
@@ -397,11 +424,11 @@ class OrbbecBackend:
                     "但动态场景的 Color/Depth 时间对应仅为 best-effort"
                 )
 
-            self._init_done.set()
-
             consecutive_wait_errors = 0
             prewarm_remaining = self._config.prewarm_frames
             while not self._stop_event.is_set():
+                with self._frame_cond:
+                    self._check_capture_state()
                 try:
                     frameset = pipeline.wait_for_frames(2000)
                 except Exception as e:
@@ -438,12 +465,18 @@ class OrbbecBackend:
                     continue
 
                 frame = self._convert_frameset(frameset)
+                if not self._has_required_streams(frame):
+                    continue
                 frame.capture_timestamp_ns = capture_timestamp_ns
                 with self._frame_cond:
+                    if self._stop_event.is_set():
+                        break
+                    self._last_frame_at = time.monotonic()
                     self._latest_frame = frame
                     self._frame_seq += 1
                     self._frame_cond.notify_all()
                 self._first_frame_event.set()
+                self._init_done.set()
 
         except Exception as e:
             self._init_error = str(e)
@@ -457,8 +490,8 @@ class OrbbecBackend:
             if pipeline is not None:
                 try:
                     pipeline.stop()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("[orbbec_camera] Pipeline 停止失败: %s", exc)
             with self._frame_cond:
                 self._frame_cond.notify_all()
 

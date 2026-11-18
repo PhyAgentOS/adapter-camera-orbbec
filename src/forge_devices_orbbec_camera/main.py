@@ -19,6 +19,7 @@ import argparse
 import os
 import sys
 import threading
+from collections import deque
 from dataclasses import dataclass
 
 
@@ -238,7 +239,7 @@ def _parse_args() -> argparse.Namespace:
 
 @dataclass
 class EncodedOutputs:
-    """encode 线程产出的最新 Arrow 载荷（drop-old 单槽）。"""
+    """encode 线程产出的一组 Arrow 图像及其采集信息。"""
 
     seq: int
     timestamp_ms: int
@@ -424,12 +425,12 @@ def run_node(config: OrbbecConfig) -> int:
                     )
 
         outputs_lock = threading.Lock()
-        latest_outputs: EncodedOutputs | None = None
+        # Keep one extra frame to absorb jitter between capture and consecutive ticks.
+        pending_outputs: deque[EncodedOutputs] = deque(maxlen=2)
         encode_error: str | None = None
-        last_sent_seq = -1
 
         def encode_loop() -> None:
-            nonlocal latest_outputs, encode_error
+            nonlocal encode_error
             after_seq = -1
             while not stop_encode.is_set():
                 try:
@@ -448,7 +449,7 @@ def run_node(config: OrbbecConfig) -> int:
                     stop_encode.set()
                     return
                 with outputs_lock:
-                    latest_outputs = encoded
+                    pending_outputs.append(encoded)
 
         encode_thread = threading.Thread(
             target=encode_loop,
@@ -475,13 +476,12 @@ def run_node(config: OrbbecConfig) -> int:
 
                     with outputs_lock:
                         err = encode_error
-                        out = latest_outputs
+                        out = pending_outputs.popleft() if pending_outputs else None
                     if err is not None:
                         logger.error("[orbbec_camera] 采集失败，节点退出: %s", err)
                         return 1
-                    if out is None or out.seq == last_sent_seq:
+                    if out is None:
                         continue
-                    last_sent_seq = out.seq
 
                     if out.color is not None:
                         _send_output(

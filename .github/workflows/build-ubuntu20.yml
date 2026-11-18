@@ -22,6 +22,7 @@ jobs:
       image: ubuntu:20.04
     env:
       RELEASE_VERSION: ${{ inputs.version }}
+      BUILD_REF: ${{ inputs.ref }}
     steps:
       - name: Install system tools
         run: |
@@ -30,6 +31,7 @@ jobs:
             binutils \
             build-essential \
             ca-certificates \
+            cmake \
             curl \
             file \
             git \
@@ -46,7 +48,8 @@ jobs:
             libxrandr2 \
             libxss1 \
             libxxf86vm1 \
-            linux-libc-dev
+            linux-libc-dev \
+            pkg-config
           rm -rf /var/lib/apt/lists/*
 
       - uses: actions/checkout@v6
@@ -66,9 +69,9 @@ jobs:
 
       - name: Verify and package binary
         run: |
-          test "${{ inputs.ref }}" = "v${RELEASE_VERSION}"
+          test "${BUILD_REF}" = "v${RELEASE_VERSION}"
           ./dist/orbbec_camera --version | tee /tmp/version.txt
-          grep -q "${RELEASE_VERSION}" /tmp/version.txt
+          grep -Fx "orbbec-camera ${RELEASE_VERSION}" /tmp/version.txt
           file ./dist/orbbec_camera
           ldd --version | sed -n '1p'
           archive="orbbec_camera-v${RELEASE_VERSION}-ubuntu20.04-x86_64.tar.gz"
