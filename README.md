@@ -68,11 +68,15 @@ Pillow 12.3.0 安全问题。
 停止时会先关闭相机，再丢弃尚未读取的图像包，避免大 RGBD 消息阻塞队列退出。
 强制结束会记录日志，无法停止的后端会抛出错误。
 
-这些生命周期检查不会修复 SDK 的 `Update data size > data buffer size` 错误，
-也不能证明 D2C profile 不兼容。持续出现时需检查 SDK、设备和固件。
-当前依赖固定 `pyorbbecsdk2==2.1.3`；在测试设备上，旧版 2.1.2 的 Dora
-RGBD 数据流曾在首帧后停滞，而 2.1.3 连续输出超过一分钟。SDK 原生日志仍可能
-报告缓冲区错误，因此升级 SDK 不等同于厂商问题已根治。
+Linux 二进制使用 `pyorbbecsdk2==2.1.3` 的 Python 绑定，并从固定的 SDK 2.10.6
+源码构建带补丁的原生库。补丁在 Gemini 2 的 bulk Y16 路径验证 UVC 包头及帧长度，
+关闭流时记录被拒绝的包和帧数。发布端每个 tick 最多发一组图像，最多缓存两组已编码
+图像，缓存满时丢弃最旧的一组。
+
+构建二进制需要 CMake、C/C++ 工具链、pkg-config 和 SDK 源码访问权限。Linux 源码
+调试可运行 `bash scripts/build_native_sdk.sh build/native-sdk`，并将相机进程的
+`LD_PRELOAD` 设为 `build/native-sdk/lib/libOrbbecSDK.so.2` 的绝对路径。
+常规 `uv sync` 安装公开 wheel。
 
 ## 基础命令
 
