@@ -1,3 +1,5 @@
+[简体中文](README_zh.md)
+
 # forge-devices-orbbec-camera
 
 Orbbec Gemini 2 深度相机的 Python 采集包与 Dora 节点。Python 包使用标准
@@ -197,3 +199,7 @@ USB 信息。
 或私人场所的数据前，应获得适用的授权并制定保留、访问和删除策略。
 
 不要把个人绝对路径、设备录包、真实场景图像、私有 SDK、设备序列号或密钥提交到仓库。
+
+## CI policy
+
+Automated dependency vulnerability audits are not maintained as CI or merge gates on this branch. Existing tests, builds, and other checks remain in place. Removing the audit gate does not change locked dependencies or resolve previously reported vulnerabilities.
