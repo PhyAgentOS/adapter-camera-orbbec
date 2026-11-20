@@ -63,12 +63,17 @@ Before upload, verify the CLI and a real snapshot, inspect ELF dependencies and 
 
 ## GitHub Actions and publication
 
-Merge and push the annotated version tag to the upstream repository first.
-Manually run **Build Ubuntu 20.04 binary** from `master` for a Forge 2
-release, with the existing `v2.x` release tag as `ref` and the matching
-package version as `version`. The workflow checks that the tag belongs to the
-dispatch branch. Download the archive and checksum from the successful Actions
-run, validate them, and attach both to the GitHub Release for the tag.
+Merge the reviewed source first, then push an immutable annotated `v<version>` tag.
+Run **Build versioned release** with that existing tag and select `release_line`
+(`1.x` for `stable/1.x`, `2.x` for `master`). Enable `build_binaries` when Linux
+binaries are needed. The release guard checks the tag type, exact source/package
+version, locked Forge/Dora dependencies and ancestry of the selected source branch.
+Forge 2.x is a breaking change: deployments must align their Forge libraries, nodes
+and Dora major versions.
 
-The workflow uploads an Actions artifact. A branch merge, a tag push, or a
-successful build does not publish a GitHub Release or publish to PyPI.
+The reusable **Build Ubuntu 20.04 binary** workflow also accepts the existing tag
+as `ref`, the matching package `version` and `release_line`. It preserves Ubuntu
+20.04 Git safe-directory compatibility while validating the selected source line.
+A successful release workflow prepares a draft with artifacts and checksums; inspect
+and validate them before publication. A merge or tag push alone does not publish a
+GitHub Release, and this workflow does not publish to PyPI.
