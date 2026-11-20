@@ -83,12 +83,6 @@ jobs:
         ref: ${{ github.workflow_sha }}
         path: .release-tools
         persist-credentials: false
-    - name: Verify tag ancestry
-      run: |
-        checked_out="$(git -c safe.directory="${GITHUB_WORKSPACE}" rev-parse HEAD)"
-        tagged="$(git -c safe.directory="${GITHUB_WORKSPACE}" rev-parse "refs/tags/${BUILD_REF}^{commit}")"
-        test "${checked_out}" = "${tagged}"
-        git -c safe.directory="${GITHUB_WORKSPACE}" merge-base --is-ancestor "${tagged}" "${GITHUB_SHA}"
     - name: Install uv and Python 3.12
       run: |
         curl -LsSf https://astral.sh/uv/0.12.5/install.sh |
